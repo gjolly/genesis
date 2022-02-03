@@ -275,6 +275,17 @@ def setup_source_list(mirror: str, series: str) -> None:
     f.close()
 
 
+def mount_virtual_filesystems(mount_dir):
+    run_command(['mount', 'dev-live', '-t', 'devtmpfs', f'{mount_dir}/dev'])
+    run_command(['mount', 'proc-live', '-t', 'proc', f'{mount_dir}/proc'])
+    run_command(['mount', 'sysfs-live', '-t', 'sysfs', f'{mount_dir}/sys'])
+    run_command(['mount', 'securityfs', '-t', 'securityfs', f'{mount_dir}/sys/kernel/security'])
+    run_command(['mount', '-t', 'cgroup2', 'none', f'{mount_dir}/sys/fs/cgroup'])
+    run_command(['mount', '-t', 'tmpfs', 'none', f'{mount_dir}/tmp'])
+    run_command(['mount', '-t', 'tmpfs', 'none', f'{mount_dir}/var/lib/apt'])
+    run_command(['mount', '-t', 'tmpfs', 'none', f'{mount_dir}/var/cache/apt'])
+
+
 @click.command()
 @click.option('--config', '-c', type=str, required=True)
 def main(config: str) -> None:
@@ -298,9 +309,12 @@ def main(config: str) -> None:
     os.mkdir(f'{mount_dir}/boot/efi')
     mount_partition(esp_part_device, f'{mount_dir}/boot/efi')
 
+    mount_virtual_filesystems(mount_dir)
+
     os.chroot(mount_dir)
     os.environ['DEBIAN_FRONTEND'] = 'noninteractive'
 
+    add_fstab_entry('LABEL=rootfs\t/\text4\tdefaults\t0\t1')
     add_fstab_entry('LABEL=UEFI\t/boot/efi\tvfat\tumask=0077\t0\t1')
 
     add_build_ppas(conf.build_ppas)
