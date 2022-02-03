@@ -8,3 +8,5 @@ extra_packages:
   - openssh-server
   - cloud-init
   - linux-virtual
+files:
+  '/etc/default/grub.d/50-cloudimg-settings.cfg': ./files/extra-grub-config.cfg

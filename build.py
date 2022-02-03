@@ -8,6 +8,7 @@ import shutil
 
 DEFAULT_MIRROR='http://archive.ubuntu.com/ubuntu/'
 SYSTEM_ROOT = os.open("/", os.O_RDONLY)
+CWD = os.getcwd()
 
 
 class Config():
@@ -19,6 +20,7 @@ class Config():
     image_size: int
     system_mirror: str
     bootloader: str
+    files: dict[str, str]
 
     def __init__(self, config_path) -> None:
         with open(config_path) as config_file:
@@ -32,9 +34,13 @@ class Config():
         self.image_size = config.get('image_size', 3)
         self.system_mirror = config.get('system_mirror', DEFAULT_MIRROR)
         self.bootloader = config.get('bootloader', 'grub')
+        self.files = config.get('files', dict())
 
 
 def run_command(cmd: list[str]) -> None:
+    shell_form_cmd = ' '.join(cmd)
+    print(f'>> {shell_form_cmd}')
+
     proc = subprocess.Popen(cmd, shell=False)
 
     proc.communicate()
@@ -44,6 +50,9 @@ def run_command(cmd: list[str]) -> None:
 
 
 def run_command_and_save_output(cmd: list[str]) -> str:
+    shell_form_cmd = ' '.join(cmd)
+    print(f'>> {shell_form_cmd}')
+
     result = subprocess.run(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
@@ -77,6 +86,8 @@ def do_system_update():
 def exit_chroot():
     os.fchdir(SYSTEM_ROOT)
     os.chroot(".")
+
+    os.chdir(CWD)
 
 
 def create_empty_disk(size: int) -> str:
@@ -286,6 +297,12 @@ def mount_virtual_filesystems(mount_dir):
     run_command(['mount', '-t', 'tmpfs', 'none', f'{mount_dir}/var/cache/apt'])
 
 
+def copy_extra_files(mount_dir: str, files: dict[str, str]) -> None:
+    for dest, local in files.items():
+        print(f'COPYING {local} -> {dest}')
+        shutil.copy(local, f'{mount_dir}{dest}')
+
+
 @click.command()
 @click.option('--config', '-c', type=str, required=True)
 def main(config: str) -> None:
@@ -323,6 +340,8 @@ def main(config: str) -> None:
 
     do_system_update()
     install_extra_packages(conf.extra_packages)
+
+    copy_extra_files(mount_dir, conf.files)
 
     install_bootloader(conf.bootloader, f'/dev/{loop_device}')
 
