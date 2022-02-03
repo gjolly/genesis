@@ -1,0 +1,4 @@
+---
+series: focal
+mirror: http://archive.ubuntu.com/ubuntu/
+extra_packages: [cloud-init]
