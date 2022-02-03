@@ -1,4 +1,10 @@
 ---
 series: focal
-mirror: http://archive.ubuntu.com/ubuntu/
-extra_packages: [cloud-init]
+bootstrap_mirror: http://archive.ubuntu.com/ubuntu/
+system_mirror: https://fr.archive.ubuntu.com/ubuntu/
+extra_packages:
+  - apt-transport-https
+  - ca-certificates
+  - openssh-server
+  - cloud-init
+  - linux-virtual

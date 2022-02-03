@@ -4,6 +4,7 @@ import tempfile
 
 import click
 import yaml
+import shutil
 
 DEFAULT_MIRROR='http://archive.ubuntu.com/ubuntu/'
 SYSTEM_ROOT = os.open("/", os.O_RDONLY)
@@ -16,6 +17,8 @@ class Config():
     extra_packages: list[str]
     build_ppas: list[str]
     image_size: int
+    system_mirror: str
+    bootloader: str
 
     def __init__(self, config_path) -> None:
         with open(config_path) as config_file:
@@ -27,6 +30,8 @@ class Config():
         self.build_ppas = config.get('build_ppas', list())
         self.kernel_package = config.get('kernel_package', 'linux-virtual')
         self.image_size = config.get('image_size', 3)
+        self.system_mirror = config.get('system_mirror', DEFAULT_MIRROR)
+        self.bootloader = config.get('bootloader', 'grub')
 
 
 def run_command(cmd: list[str]) -> None:
@@ -48,7 +53,7 @@ def run_command_and_save_output(cmd: list[str]) -> str:
     return result.stdout.decode()
 
 
-def run_deboostrap(conf: Config, build_dir_path: str) -> None:
+def deboostrap(conf: Config, build_dir_path: str) -> None:
     run_command(
             ['/usr/sbin/debootstrap',
                 conf.series,
@@ -56,12 +61,12 @@ def run_deboostrap(conf: Config, build_dir_path: str) -> None:
                 conf.mirror])
 
 
-def add_build_ppas(conf: Config):
+def add_build_ppas(ppas: list[str]):
     pass
 
 
-def install_extra_packages(conf: Config):
-    run_command(['/usr/bin/apt-get', 'install', '-y'] + conf.extra_packages)
+def install_extra_packages(packages: list[str]):
+    run_command(['/usr/bin/apt-get', 'install', '-y'] + packages)
 
 
 def do_system_update():
@@ -120,26 +125,42 @@ def partition_disk(disk_image_path: str) -> None:
         ])
 
 
-def format_ext4_partition(device: str, label: str = 'rootfs') -> None:
+def format_ext4_partition(device: str, label: str) -> None:
     if label == '':
         # TODO: allow no label to be passed
         raise ValueError('no label passed')
-    label_flag = f'-L {label}'
 
     run_command([
         'mkfs.ext4', '-F',
         '-b', '4096',
         '-i', '8192',
         '-m', '0',
-        label_flag,
+        '-L', label,
         '-E', 'resize=536870912',
         device
         ])
 
 
-def format_partition(device: str, partition_format='ext4') -> None:
+def format_vfat_partition(device: str, label: str) -> None:
+    if label == '':
+        # TODO: allow no label to be passed
+        raise ValueError('no label passed')
+
+    run_command([
+        'mkfs.vfat',
+        '-F', '32',
+        '-n', label,
+        device
+        ])
+
+
+def format_partition(
+        device: str,
+        partition_format: str = 'ext4', label: str = 'rootfs') -> None:
     if partition_format == 'ext4':
-        format_ext4_partition(device)
+        format_ext4_partition(device, label)
+    elif partition_format == 'vfat':
+        format_vfat_partition(device, label)
     else:
         raise ValueError(f'partition type {partition_format} unsupported')
 
@@ -166,23 +187,98 @@ def mount_partition(
     run_command(['mount', rootfs_partition, mount_dir])
 
 
+def add_fstab_entry(entry: str):
+    f = open('/etc/fstab', 'w')
+    f.write(f'{entry}\n')
+    f.close()
+
+
+def umount_all(mount_dir: str):
+    run_command(['umount', '-R', mount_dir])
+
+
+def teardown_loop_device(device: str):
+    run_command(['losetup', '-d', f'/dev/{device}'])
+
+
+def divert_grub() -> None:
+    run_command([
+        'dpkg-divert', '--local',
+        '--divert', '/etc/grub.d/30_os-prober.dpkg-divert',
+        '--rename', '/etc/grub.d/30_os-prober'
+        ])
+
+    detect_virt_tool = '/usr/bin/systemd-detect-virt'
+    run_command([
+        'dpkg-divert', '--local',
+        '--rename', detect_virt_tool
+        ])
+
+    f = open(detect_virt_tool, 'w')
+    f.write('exit 1\n')
+    f.close()
+
+    run_command(['chmod', '+x', detect_virt_tool])
+
+def undivert_grub() -> None:
+    run_command([
+        'dpkg-divert', '--remove', '--local',
+        '--divert', '/etc/grub.d/30_os-prober.dpkg-divert',
+        '--rename', '/etc/grub.d/30_os-prober'
+        ])
+
+    detect_virt_tool = '/usr/bin/systemd-detect-virt'
+    os.remove(detect_virt_tool)
+    run_command([
+        'dpkg-divert', '--remove', '--local',
+        '--rename', detect_virt_tool
+        ])
+
+
+def install_grub(device: str) -> None:
+    install_extra_packages(['shim-signed', 'grub-pc'])
+
+    run_command([
+        'grub-install',
+        device,
+        '--boot-directory=/boot',
+        '--efi-directory=/boot/efi',
+        '--target=x86_64-efi',
+        '--uefi-secure-boot',
+        '--no-nvram'
+        ])
+
+    run_command([
+        'grub-install',
+        '--target=i386-pc',
+        device
+        ])
+
+    divert_grub()
+    run_command(['update-grub'])
+    undivert_grub()
+
+
+def install_bootloader(bootloader: str, device: str) -> None:
+    if bootloader == 'grub':
+        install_grub(device)
+    else:
+        raise ValueError(f'bootloader {bootloader} not supported')
+
+
+def setup_source_list(mirror: str, series: str) -> None:
+    f = open('/etc/apt/sources.list', 'w')
+    f.write(f'deb {mirror} {series} main\n')
+    f.write(f'deb {mirror} {series}-updates main\n')
+    f.write(f'deb {mirror} {series}-security main\n')
+
+    f.close()
+
+
 @click.command()
 @click.option('--config', '-c', type=str, required=True)
 def main(config: str) -> None:
     conf = Config(config)
-
-    #build_dir = tempfile.TemporaryDirectory()
-    #run_deboostrap(conf, build_dir.name)
-
-    #real_root = os.open("/", os.O_RDONLY)
-    #os.chroot(build_dir.name)
-
-    #add_build_ppas(conf)
-
-    #do_system_update()
-    #install_extra_packages(conf)
-
-    #exit_chroot()
 
     disk_image = create_empty_disk(conf.image_size)
     partition_disk(disk_image)
@@ -192,16 +288,37 @@ def main(config: str) -> None:
     esp_part_device = f'/dev/mapper/{loop_device}p15'
 
     format_partition(rootfs_part_device, partition_format='ext4')
+    format_partition(esp_part_device, partition_format='vfat', label='UEFI')
 
-    mount_dir = tempfile.TemporaryDirectory()
-    mount_partition(rootfs_part_device, mount_dir.name)
+    mount_dir = tempfile.mkdtemp(prefix='genesis')
+    mount_partition(rootfs_part_device, mount_dir)
 
-    print(rootfs_part_device, esp_part_device, mount_dir.name)
+    deboostrap(conf, mount_dir)
+
+    os.mkdir(f'{mount_dir}/boot/efi')
+    mount_partition(esp_part_device, f'{mount_dir}/boot/efi')
+
+    os.chroot(mount_dir)
+    os.environ['DEBIAN_FRONTEND'] = 'noninteractive'
+
+    add_fstab_entry('LABEL=UEFI\t/boot/efi\tvfat\tumask=0077\t0\t1')
+
+    add_build_ppas(conf.build_ppas)
+
+    setup_source_list(conf.mirror, conf.series)
+
+    do_system_update()
+    install_extra_packages(conf.extra_packages)
+
+    install_bootloader(conf.bootloader, f'/dev/{loop_device}')
+
+    exit_chroot()
+
+    umount_all(mount_dir)
+    os.rmdir(mount_dir)
+    teardown_loop_device(loop_device)
 
     os.close(SYSTEM_ROOT)
-    #mount_dir.cleanup()
-    #build_dir.cleanup()
-
 
 if __name__ == '__main__':
     main()
