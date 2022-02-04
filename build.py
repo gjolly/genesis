@@ -199,7 +199,7 @@ def mount_partition(
 
 
 def add_fstab_entry(entry: str):
-    f = open('/etc/fstab', 'w')
+    f = open('/etc/fstab', 'a')
     f.write(f'{entry}\n')
     f.close()
 
@@ -209,6 +209,12 @@ def umount_all(mount_dir: str):
 
 
 def teardown_loop_device(device: str):
+    out = run_command_and_save_output(['dmsetup', 'table'])
+    for line in out.rstrip().split('\n'):
+        mapper_dev = line.split(':')[0]
+        if device in mapper_dev:
+            run_command(['dmsetup', 'remove', f'/dev/mapper/{mapper_dev}'])
+
     run_command(['losetup', '-d', f'/dev/{device}'])
 
 
@@ -300,6 +306,7 @@ def mount_virtual_filesystems(mount_dir):
 def copy_extra_files(mount_dir: str, files: dict[str, str]) -> None:
     for dest, local in files.items():
         print(f'COPYING {local} -> {dest}')
+
         shutil.copy(local, f'{mount_dir}{dest}')
 
 
@@ -341,7 +348,11 @@ def main(config: str) -> None:
     do_system_update()
     install_extra_packages(conf.extra_packages)
 
+    exit_chroot()
+
     copy_extra_files(mount_dir, conf.files)
+
+    os.chroot(mount_dir)
 
     install_bootloader(conf.bootloader, f'/dev/{loop_device}')
 

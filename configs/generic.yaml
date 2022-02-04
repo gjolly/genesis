@@ -1,0 +1,27 @@
+---
+# Ubuntu series to build, see "ubuntu-distro --supported" for
+# all the possible options
+series: focal
+
+# To bootstrap the system, we need to use plain http mirrors
+bootstrap_mirror: http://archive.ubuntu.com/ubuntu/
+
+# Mirrors to install on the final system
+system_mirror: https://fr.archive.ubuntu.com/ubuntu/
+
+# Which package do you want to install on the system.
+# Some package (like bootloaders) should not be specified
+# here as the require a careful setup before installing
+extra_packages:
+  - apt-transport-https
+  - ca-certificates
+  - openssh-server
+  - cloud-init
+  - linux-virtual
+
+# Files to place/replace on the system
+# The files are copied before configuring the bootloader
+# so they can be used to configure the bootloader
+files:
+  '/etc/default/grub.d/50-cloudimg-settings.cfg': ./files/extra-grub-config.cfg
+  '/etc/hostname': ./files/hostname
