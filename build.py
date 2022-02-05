@@ -248,11 +248,12 @@ def main(config_file: str) -> None:
 
     if conf.binary_format != 'raw':
         convert_binary_image(disk_image, conf.binary_format, conf.out_path)
+        os.remove(disk_image)
     else:
         shutil.move(disk_image, conf.out_path)
 
-    os.remove(disk_image)
     os.close(SYSTEM_ROOT)
+
 
 if __name__ == '__main__':
     main()
