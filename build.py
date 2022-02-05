@@ -1,73 +1,25 @@
 import os
 import subprocess
 import tempfile
-
 import click
 import yaml
 import shutil
 
-DEFAULT_MIRROR='http://archive.ubuntu.com/ubuntu/'
+from typing import Any
+
+import snaps
+import commands
+import config
+import disk_utils
+
 SYSTEM_ROOT = os.open("/", os.O_RDONLY)
 CWD = os.getcwd()
 
-
-class Config():
-    series: str
-    mirror: str
-    kernel_package: str
-    extra_packages: list[str]
-    build_ppas: list[str]
-    image_size: int
-    system_mirror: str
-    bootloader: str
-    files: dict[str, str]
-
-    def __init__(self, config_path) -> None:
-        with open(config_path) as config_file:
-            config = yaml.safe_load(config_file)
-
-        self.series = config['series']
-        self.mirror = config.get('mirror', DEFAULT_MIRROR)
-        self.extra_packages = config.get('extra_packages', list())
-        self.build_ppas = config.get('build_ppas', list())
-        self.kernel_package = config.get('kernel_package', 'linux-virtual')
-        self.image_size = config.get('image_size', 3)
-        self.system_mirror = config.get('system_mirror', DEFAULT_MIRROR)
-        self.bootloader = config.get('bootloader', 'grub')
-        self.files = config.get('files', dict())
-
-
-def run_command(cmd: list[str]) -> None:
-    shell_form_cmd = ' '.join(cmd)
-    print(f'>> {shell_form_cmd}')
-
-    proc = subprocess.Popen(cmd, shell=False)
-
-    proc.communicate()
-
-    if proc.returncode != 0:
-        raise RuntimeError(f'{cmd} failed')
-
-
-def run_command_and_save_output(cmd: list[str]) -> str:
-    shell_form_cmd = ' '.join(cmd)
-    print(f'>> {shell_form_cmd}')
-
-    result = subprocess.run(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-
-    if result.returncode != 0:
-        raise RuntimeError(f'{cmd} failed')
-
-    return result.stdout.decode()
-
-
-def deboostrap(conf: Config, build_dir_path: str) -> None:
-    run_command(
-            ['/usr/sbin/debootstrap',
-                conf.series,
-                build_dir_path,
-                conf.mirror])
+def deboostrap(conf: config.Config, build_dir_path: str) -> None:
+    commands.run(['/usr/sbin/debootstrap',
+                  conf.series,
+                  build_dir_path,
+                  conf.mirror])
 
 
 def add_build_ppas(ppas: list[str]):
@@ -75,12 +27,12 @@ def add_build_ppas(ppas: list[str]):
 
 
 def install_extra_packages(packages: list[str]):
-    run_command(['/usr/bin/apt-get', 'install', '-y'] + packages)
+    commands.run(['/usr/bin/apt-get', 'install', '-y'] + packages)
 
 
 def do_system_update():
-    run_command(['/usr/bin/apt-get', 'update'])
-    run_command(['/usr/bin/apt-get', '-y', 'upgrade'])
+    commands.run(['/usr/bin/apt-get', 'update'])
+    commands.run(['/usr/bin/apt-get', '-y', 'upgrade'])
 
 
 def exit_chroot():
@@ -90,96 +42,10 @@ def exit_chroot():
     os.chdir(CWD)
 
 
-def create_empty_disk(size: int) -> str:
-    """
-    Create an empty disk image
-    :param size: size of the disk (in GigaBytes)
-    :return: location of the disk
-    """
-    disk_path = 'disk.img'
-    run_command([
-        '/usr/bin/qemu-img',
-        'create',
-        disk_path, str(size)+'G'])
-
-    return disk_path
-
-
-def partition_disk(disk_image_path: str) -> None:
-    """
-    Partition the disk image. TODO: return the partition numbers
-    """
-    run_command([
-        '/usr/sbin/sgdisk',
-        disk_image_path,
-        '--zip-all'])
-
-    run_command([
-        '/usr/sbin/sgdisk',
-        disk_image_path,
-        '--new=14::+4M',
-        '--new=15::+106M',
-        '--new=1::'
-        ])
-
-    run_command([
-        '/usr/sbin/sgdisk',
-        disk_image_path,
-        '-t', '14:ef02',
-        '-t', '15:ef00'
-        ])
-
-    run_command([
-        '/usr/sbin/sgdisk',
-        disk_image_path,
-        '--print'
-        ])
-
-
-def format_ext4_partition(device: str, label: str) -> None:
-    if label == '':
-        # TODO: allow no label to be passed
-        raise ValueError('no label passed')
-
-    run_command([
-        'mkfs.ext4', '-F',
-        '-b', '4096',
-        '-i', '8192',
-        '-m', '0',
-        '-L', label,
-        '-E', 'resize=536870912',
-        device
-        ])
-
-
-def format_vfat_partition(device: str, label: str) -> None:
-    if label == '':
-        # TODO: allow no label to be passed
-        raise ValueError('no label passed')
-
-    run_command([
-        'mkfs.vfat',
-        '-F', '32',
-        '-n', label,
-        device
-        ])
-
-
-def format_partition(
-        device: str,
-        partition_format: str = 'ext4', label: str = 'rootfs') -> None:
-    if partition_format == 'ext4':
-        format_ext4_partition(device, label)
-    elif partition_format == 'vfat':
-        format_vfat_partition(device, label)
-    else:
-        raise ValueError(f'partition type {partition_format} unsupported')
-
-
 def setup_loop_device(disk_image_path: str) -> str:
-    run_command(['kpartx', '-s', '-v', '-a', disk_image_path])
+    commands.run(['kpartx', '-s', '-v', '-a', disk_image_path])
 
-    out = run_command_and_save_output([
+    out = commands.run_and_save_output([
         'losetup', '--noheadings', '--output', 'NAME,BACK-FILE', '-l'])
     lines_out = out.rstrip().split('\n')
 
@@ -195,7 +61,7 @@ def setup_loop_device(disk_image_path: str) -> str:
 
 def mount_partition(
         rootfs_partition: str, mount_dir: str) -> None:
-    run_command(['mount', rootfs_partition, mount_dir])
+    commands.run(['mount', rootfs_partition, mount_dir])
 
 
 def add_fstab_entry(entry: str):
@@ -205,28 +71,28 @@ def add_fstab_entry(entry: str):
 
 
 def umount_all(mount_dir: str):
-    run_command(['umount', '-R', mount_dir])
+    commands.run(['umount', '-R', mount_dir])
 
 
 def teardown_loop_device(device: str):
-    out = run_command_and_save_output(['dmsetup', 'table'])
+    out = commands.run_and_save_output(['dmsetup', 'table'])
     for line in out.rstrip().split('\n'):
         mapper_dev = line.split(':')[0]
         if device in mapper_dev:
-            run_command(['dmsetup', 'remove', f'/dev/mapper/{mapper_dev}'])
+            commands.run(['dmsetup', 'remove', f'/dev/mapper/{mapper_dev}'])
 
-    run_command(['losetup', '-d', f'/dev/{device}'])
+    commands.run(['losetup', '-d', f'/dev/{device}'])
 
 
 def divert_grub() -> None:
-    run_command([
+    commands.run([
         'dpkg-divert', '--local',
         '--divert', '/etc/grub.d/30_os-prober.dpkg-divert',
         '--rename', '/etc/grub.d/30_os-prober'
         ])
 
     detect_virt_tool = '/usr/bin/systemd-detect-virt'
-    run_command([
+    commands.run([
         'dpkg-divert', '--local',
         '--rename', detect_virt_tool
         ])
@@ -235,10 +101,10 @@ def divert_grub() -> None:
     f.write('exit 1\n')
     f.close()
 
-    run_command(['chmod', '+x', detect_virt_tool])
+    commands.run(['chmod', '+x', detect_virt_tool])
 
 def undivert_grub() -> None:
-    run_command([
+    commands.run([
         'dpkg-divert', '--remove', '--local',
         '--divert', '/etc/grub.d/30_os-prober.dpkg-divert',
         '--rename', '/etc/grub.d/30_os-prober'
@@ -246,7 +112,7 @@ def undivert_grub() -> None:
 
     detect_virt_tool = '/usr/bin/systemd-detect-virt'
     os.remove(detect_virt_tool)
-    run_command([
+    commands.run([
         'dpkg-divert', '--remove', '--local',
         '--rename', detect_virt_tool
         ])
@@ -255,7 +121,7 @@ def undivert_grub() -> None:
 def install_grub(device: str) -> None:
     install_extra_packages(['shim-signed', 'grub-pc'])
 
-    run_command([
+    commands.run([
         'grub-install',
         device,
         '--boot-directory=/boot',
@@ -265,14 +131,14 @@ def install_grub(device: str) -> None:
         '--no-nvram'
         ])
 
-    run_command([
+    commands.run([
         'grub-install',
         '--target=i386-pc',
         device
         ])
 
     divert_grub()
-    run_command(['update-grub'])
+    commands.run(['update-grub'])
     undivert_grub()
 
 
@@ -293,14 +159,14 @@ def setup_source_list(mirror: str, series: str) -> None:
 
 
 def mount_virtual_filesystems(mount_dir):
-    run_command(['mount', 'dev-live', '-t', 'devtmpfs', f'{mount_dir}/dev'])
-    run_command(['mount', 'proc-live', '-t', 'proc', f'{mount_dir}/proc'])
-    run_command(['mount', 'sysfs-live', '-t', 'sysfs', f'{mount_dir}/sys'])
-    run_command(['mount', 'securityfs', '-t', 'securityfs', f'{mount_dir}/sys/kernel/security'])
-    run_command(['mount', '-t', 'cgroup2', 'none', f'{mount_dir}/sys/fs/cgroup'])
-    run_command(['mount', '-t', 'tmpfs', 'none', f'{mount_dir}/tmp'])
-    run_command(['mount', '-t', 'tmpfs', 'none', f'{mount_dir}/var/lib/apt'])
-    run_command(['mount', '-t', 'tmpfs', 'none', f'{mount_dir}/var/cache/apt'])
+    commands.run(['mount', 'dev-live', '-t', 'devtmpfs', f'{mount_dir}/dev'])
+    commands.run(['mount', 'proc-live', '-t', 'proc', f'{mount_dir}/proc'])
+    commands.run(['mount', 'sysfs-live', '-t', 'sysfs', f'{mount_dir}/sys'])
+    commands.run(['mount', 'securityfs', '-t', 'securityfs', f'{mount_dir}/sys/kernel/security'])
+    commands.run(['mount', '-t', 'cgroup2', 'none', f'{mount_dir}/sys/fs/cgroup'])
+    commands.run(['mount', '-t', 'tmpfs', 'none', f'{mount_dir}/tmp'])
+    commands.run(['mount', '-t', 'tmpfs', 'none', f'{mount_dir}/var/lib/apt'])
+    commands.run(['mount', '-t', 'tmpfs', 'none', f'{mount_dir}/var/cache/apt'])
 
 
 def copy_extra_files(mount_dir: str, files: dict[str, str]) -> None:
@@ -310,20 +176,31 @@ def copy_extra_files(mount_dir: str, files: dict[str, str]) -> None:
         shutil.copy(local, f'{mount_dir}{dest}')
 
 
-@click.command()
-@click.option('--config', '-c', type=str, required=True)
-def main(config: str) -> None:
-    conf = Config(config)
+def convert_binary_image(
+        disk_image: str, binary_format: str, out_path: str) -> None:
+    commands.run([
+        'qemu-img',
+        'convert', '-f', 'raw', '-O', binary_format,
+        disk_image,
+        out_path,
+        ])
 
-    disk_image = create_empty_disk(conf.image_size)
-    partition_disk(disk_image)
+
+@click.command()
+@click.option('--config-file', '-c', type=str, required=True)
+def main(config_file: str) -> None:
+    conf = config.Config(config_file)
+
+    disk_image = disk_utils.create_empty_disk(conf.image_size)
+    disk_utils.partition_disk(disk_image)
     loop_device = setup_loop_device(disk_image)
 
     rootfs_part_device = f'/dev/mapper/{loop_device}p1'
     esp_part_device = f'/dev/mapper/{loop_device}p15'
 
-    format_partition(rootfs_part_device, partition_format='ext4')
-    format_partition(esp_part_device, partition_format='vfat', label='UEFI')
+    disk_utils.format_partition(rootfs_part_device, partition_format='ext4')
+    disk_utils.format_partition(
+            esp_part_device, partition_format='vfat', label='UEFI')
 
     mount_dir = tempfile.mkdtemp(prefix='genesis')
     mount_partition(rootfs_part_device, mount_dir)
@@ -346,6 +223,11 @@ def main(config: str) -> None:
     setup_source_list(conf.mirror, conf.series)
 
     do_system_update()
+
+    # make sure we install snapd if snap preseeding is neededj
+    if len(conf.snaps) > 1 and 'snapd' not in conf.extra_packages:
+        conf.extra_packages.append('snapd')
+
     install_extra_packages(conf.extra_packages)
 
     exit_chroot()
@@ -358,10 +240,18 @@ def main(config: str) -> None:
 
     exit_chroot()
 
+    snaps.preseed(conf.snaps, mount_dir)
+
     umount_all(mount_dir)
     os.rmdir(mount_dir)
     teardown_loop_device(loop_device)
 
+    if conf.binary_format != 'raw':
+        convert_binary_image(disk_image, conf.binary_format, conf.out_path)
+    else:
+        shutil.move(disk_image, conf.out_path)
+
+    os.remove(disk_image)
     os.close(SYSTEM_ROOT)
 
 if __name__ == '__main__':

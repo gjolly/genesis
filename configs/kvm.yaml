@@ -3,6 +3,9 @@
 # all the possible options
 series: focal
 
+binary_format: qcow2
+out_path: ./ubuntu-kvm.qcow2.img
+
 # To bootstrap the system, we need to use plain http mirrors
 bootstrap_mirror: http://archive.ubuntu.com/ubuntu/
 
@@ -17,10 +20,8 @@ extra_packages:
   - ca-certificates
   - openssh-server
   - cloud-init
-  - linux-virtual
+  - linux-kvm
 
-snaps:
-  lxd: stable
 
 # Files to place/replace on the system
 # The files are copied before configuring the bootloader
