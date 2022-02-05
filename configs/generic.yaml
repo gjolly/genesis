@@ -20,7 +20,11 @@ extra_packages:
   - linux-virtual
 
 snaps:
-  lxd: stable
+  lxd:
+    channel: stable
+  git-ubuntu:
+    channel: stable
+    classic: true
 
 # Files to place/replace on the system
 # The files are copied before configuring the bootloader

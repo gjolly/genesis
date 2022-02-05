@@ -4,7 +4,7 @@ import yaml
 import tempfile
 import shutil
 
-from typing import Any
+from typing import Any, Union
 
 import genesis.commands as commands
 
@@ -93,8 +93,8 @@ def prepare_assertions(assertion_dir: str,
 
 
 def preseed_snap(
-        snap: str, channel: str,
-        snap_installed: dict[str, list[dict[str, str]]],
+        snap: str, channel: str, classic: bool,
+        snap_installed: dict[str, list[dict[str, Union[str, bool]]]],
         mount_dir: str) -> None:
     """
     Pre-install a snap on the system. Also check what its snap base is
@@ -129,7 +129,9 @@ def preseed_snap(
             shutil.move(f, snap_dir)
             info = get_info(f)
             if 'base' in info:
-                preseed_snap(info['base'], 'stable', snap_installed, mount_dir)
+                preseed_snap(
+                        info['base'],
+                        'stable', False, snap_installed, mount_dir)
         elif f.endswith('.assert'):
             shutil.move(f, assertion_dir)
 
@@ -137,12 +139,13 @@ def preseed_snap(
         'name': snap,
         'channel': channel,
         'file': snap_file,
+        'classic': classic,
     })
 
     os.chdir(cwd)
 
 
-def preseed(snaps: dict[str, str], mount_dir: str):
+def preseed(snaps: dict[str, dict[str, str]], mount_dir: str):
     """
     Pre-install snaps on the image
     """
@@ -160,15 +163,21 @@ def preseed(snaps: dict[str, str], mount_dir: str):
     prepare_assertions(assertion_dir)
 
     seed_yaml = f'{mount_dir}/var/lib/snapd/seed/seed.yaml'
-    snaps_installed: dict[str, list[dict[str, str]]] = {'snaps': []}
+    snaps_installed: dict[str, list[dict[str, Union[str, bool]]]] = {
+            'snaps': []}
 
     # just install snapd, we could avoid that if there was
     # no snap with bases >= core18 but we are lazy
     if 'snapd' not in snaps:
-        snaps['snapd'] = 'stable'
+        snaps['snapd'] = {
+            'channel': 'stable',
+            'classic': 'false'
+        }
 
-    for snap, channel in snaps.items():
-        preseed_snap(snap, channel, snaps_installed, mount_dir)
+    for snap, spec in snaps.items():
+        classic = True if 'classic' in spec and spec['classic'] else False
+        preseed_snap(
+                snap, spec['channel'], classic, snaps_installed, mount_dir)
 
     snap_seed_yaml = yaml.dump(snaps_installed)
     with open(seed_yaml, 'w') as seed:
@@ -176,11 +185,3 @@ def preseed(snaps: dict[str, str], mount_dir: str):
 
     # validate the seed file we just written
     commands.run(['snap', 'debug', 'validate-seed', seed_yaml])
-
-    # do the actually pre-seeding
-    #commands.run([
-    #    '/usr/lib/snapd/snap-preseed', '--reset', mount_dir
-    #])
-    #commands.run([
-    #    '/usr/lib/snapd/snap-preseed', mount_dir
-    #])

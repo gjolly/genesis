@@ -14,7 +14,7 @@ class Config():
     files: dict[str, str]
     binary_format: str
     out_path: str
-    snaps: dict[str, str]
+    snaps: dict[str, dict[str, str]]
 
     def __init__(self, config_path) -> None:
         with open(config_path) as config_file:

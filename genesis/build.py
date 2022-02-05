@@ -12,8 +12,27 @@ import genesis.commands as commands
 import genesis.config as config
 import genesis.disk_utils as disk_utils
 
+
 SYSTEM_ROOT = os.open("/", os.O_RDONLY)
 CWD = os.getcwd()
+
+
+class BuildState():
+    directories_to_umount: list[str]
+    files_to_delete: list[str]
+    loop_to_detach: list[str]
+    in_chroot: bool
+    disk_image: str
+    success: bool
+
+    def __init__(self):
+        self.in_chroot = False
+        self.directories_to_umount = list()
+        self.files_to_delete = list()
+        self.loop_to_detach = list()
+        self.disk_image = list()
+        self.success = False
+
 
 def deboostrap(conf: config.Config, build_dir_path: str) -> None:
     commands.run(['/usr/sbin/debootstrap',
@@ -103,6 +122,7 @@ def divert_grub() -> None:
 
     commands.run(['chmod', '+x', detect_virt_tool])
 
+
 def undivert_grub() -> None:
     commands.run([
         'dpkg-divert', '--remove', '--local',
@@ -186,14 +206,48 @@ def convert_binary_image(
         ])
 
 
+def cleanup(build_state: BuildState, debug: bool):
+    if build_state.in_chroot:
+        exit_chroot()
+
+    for mount in build_state.directories_to_umount:
+        umount_all(mount)
+
+    for device in build_state.loop_to_detach:
+        teardown_loop_device(device)
+
+    for f in build_state.files_to_delete:
+        if os.path.isdir(f):
+            os.rmdir(f)
+        else:
+            os.remove(f)
+
+    if not build_state.success and not debug:
+        os.remove(build_state.disk_image)
+    elif not build_state.success:
+        print(f'disk image kept for inspection: {build_state.disk_image}')
+
+
 @click.command()
 @click.option('--config-file', '-c', type=str, required=True)
-def main(config_file: str) -> None:
+@click.option('--debug', is_flag=True, default=False)
+def main(config_file: str, debug: bool) -> None:
     conf = config.Config(config_file)
+    build_state = BuildState()
 
+    try:
+        build(conf, build_state)
+    finally:
+        cleanup(build_state, debug)
+
+
+def build(conf: config.Config, state: BuildState):
     disk_image = disk_utils.create_empty_disk(conf.image_size)
+    state.disk_image = disk_image
+
     disk_utils.partition_disk(disk_image)
     loop_device = setup_loop_device(disk_image)
+    state.loop_to_detach.append(loop_device)
 
     rootfs_part_device = f'/dev/mapper/{loop_device}p1'
     esp_part_device = f'/dev/mapper/{loop_device}p15'
@@ -204,6 +258,8 @@ def main(config_file: str) -> None:
 
     mount_dir = tempfile.mkdtemp(prefix='genesis')
     mount_partition(rootfs_part_device, mount_dir)
+    state.directories_to_umount.append(mount_dir)
+    state.files_to_delete.append(mount_dir)
 
     deboostrap(conf, mount_dir)
 
@@ -213,6 +269,8 @@ def main(config_file: str) -> None:
     mount_virtual_filesystems(mount_dir)
 
     os.chroot(mount_dir)
+    state.in_chroot = True
+
     os.environ['DEBIAN_FRONTEND'] = 'noninteractive'
 
     add_fstab_entry('LABEL=rootfs\t/\text4\tdefaults\t0\t1')
@@ -231,26 +289,27 @@ def main(config_file: str) -> None:
     install_extra_packages(conf.extra_packages)
 
     exit_chroot()
+    state.in_chroot = False
 
     copy_extra_files(mount_dir, conf.files)
 
     os.chroot(mount_dir)
+    state.in_chroot = True
 
     install_bootloader(conf.bootloader, f'/dev/{loop_device}')
 
     exit_chroot()
+    state.in_chroot = False
 
     snaps.preseed(conf.snaps, mount_dir)
-
-    umount_all(mount_dir)
-    os.rmdir(mount_dir)
-    teardown_loop_device(loop_device)
 
     if conf.binary_format != 'raw':
         convert_binary_image(disk_image, conf.binary_format, conf.out_path)
         os.remove(disk_image)
     else:
         shutil.move(disk_image, conf.out_path)
+
+    state.success = True
 
     os.close(SYSTEM_ROOT)
 
