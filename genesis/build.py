@@ -7,10 +7,10 @@ import shutil
 
 from typing import Any
 
-import snaps
-import commands
-import config
-import disk_utils
+import genesis.snaps as snaps
+import genesis.commands as commands
+import genesis.config as config
+import genesis.disk_utils as disk_utils
 
 SYSTEM_ROOT = os.open("/", os.O_RDONLY)
 CWD = os.getcwd()

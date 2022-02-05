@@ -1,6 +1,6 @@
 import tempfile
 
-import commands
+import genesis.commands as commands
 
 def create_empty_disk(size: int) -> str:
     """

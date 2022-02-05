@@ -6,7 +6,7 @@ import shutil
 
 from typing import Any
 
-import commands
+import genesis.commands as commands
 
 def get_info(snap_path: str) -> dict[str, Any]:
     snap_info_raw = commands.run_and_save_output([
