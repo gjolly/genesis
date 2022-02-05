@@ -1,4 +1,5 @@
 import os
+import pathlib
 import yaml
 import tempfile
 import shutil
@@ -12,7 +13,7 @@ def get_info(snap_path: str) -> dict[str, Any]:
         'snap', 'info', '--verbose', snap_path
         ])
 
-    snap_info = yaml.load(snap_info_raw)
+    snap_info = yaml.safe_load(snap_info_raw)
 
     return snap_info
 
@@ -27,10 +28,9 @@ def preseeded(snap: str, snap_dir: str) -> bool:
 
 
 def create_directory(directory: str) -> None:
-    try:
-        os.mkdir(directory)
-    except FileExistsError:
-        pass
+    pathlib.Path(
+        directory
+    ).mkdir(parents=True, exist_ok=True)
 
 
 def delete_signature(content: str) -> str:
@@ -58,7 +58,7 @@ def prepare_assertions(assertion_dir: str,
         model: str = 'generic-classic'):
     model_path = f'{assertion_dir}/model'
     account_key_path = f'{assertion_dir}/account-key'
-    account_path = f'{assertion_dir}/account-key'
+    account_path = f'{assertion_dir}/account'
 
     out = commands.run_and_save_output([
         'snap', 'known', '--remote', 'model',
@@ -69,7 +69,7 @@ def prepare_assertions(assertion_dir: str,
 
     content = delete_signature(out)
 
-    model_obj = yaml.load(content)
+    model_obj = yaml.safe_load(content)
     key = model_obj['sign-key-sha3-384']
 
     out = commands.run_and_save_output([
@@ -81,7 +81,7 @@ def prepare_assertions(assertion_dir: str,
 
     #snap known --remote account account-id=$account
     content = delete_signature(out)
-    account_obj = yaml.load(content)
+    account_obj = yaml.safe_load(content)
     account_id = account_obj['account-id']
 
     out = commands.run_and_save_output([
@@ -111,12 +111,6 @@ def preseed_snap(
     seed_dir = f'{mount_dir}/var/lib/snapd/seed'
     assertion_dir = f'{seed_dir}/assertions'
     snap_dir = f'{seed_dir}/snaps'
-
-    prepare_assertions(assertion_dir)
-
-    create_directory(seed_dir)
-    create_directory(assertion_dir)
-    create_directory(snap_dir)
 
     if preseeded(snap, snap_dir):
         return
@@ -155,8 +149,23 @@ def preseed(snaps: dict[str, str], mount_dir: str):
     if len(snaps) == 0:
         return
 
+    seed_dir = f'{mount_dir}/var/lib/snapd/seed'
+    assertion_dir = f'{seed_dir}/assertions'
+    snap_dir = f'{seed_dir}/snaps'
+
+    create_directory(seed_dir)
+    create_directory(assertion_dir)
+    create_directory(snap_dir)
+
+    prepare_assertions(assertion_dir)
+
     seed_yaml = f'{mount_dir}/var/lib/snapd/seed/seed.yaml'
-    snaps_installed: dict[str, list[dict[str, str]]] = dict()
+    snaps_installed: dict[str, list[dict[str, str]]] = {'snaps': []}
+
+    # just install snapd, we could avoid that if there was
+    # no snap with bases >= core18 but we are lazy
+    if 'snapd' not in snaps:
+        snaps['snapd'] = 'stable'
 
     for snap, channel in snaps.items():
         preseed_snap(snap, channel, snaps_installed, mount_dir)
@@ -169,6 +178,9 @@ def preseed(snaps: dict[str, str], mount_dir: str):
     commands.run(['snap', 'debug', 'validate-seed', seed_yaml])
 
     # do the actually pre-seeding
-    commands.run([
-        '/usr/lib/snapd/snap-preseed', mount_dir
-    ])
+    #commands.run([
+    #    '/usr/lib/snapd/snap-preseed', '--reset', mount_dir
+    #])
+    #commands.run([
+    #    '/usr/lib/snapd/snap-preseed', mount_dir
+    #])

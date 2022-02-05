@@ -225,7 +225,7 @@ def main(config_file: str) -> None:
     do_system_update()
 
     # make sure we install snapd if snap preseeding is neededj
-    if len(conf.snaps) > 1 and 'snapd' not in conf.extra_packages:
+    if len(conf.snaps) > 0 and 'snapd' not in conf.extra_packages:
         conf.extra_packages.append('snapd')
 
     install_extra_packages(conf.extra_packages)
