@@ -8,9 +8,9 @@ from typing import Any, Union
 
 import genesis.commands as commands
 
-def get_info(snap_path: str) -> dict[str, Any]:
+def get_info(snap: str) -> dict[str, Any]:
     snap_info_raw = commands.run_and_save_output([
-        'snap', 'info', '--verbose', snap_path
+        'snap', 'info', '--verbose', snap
         ])
 
     snap_info = yaml.safe_load(snap_info_raw)
@@ -92,6 +92,11 @@ def prepare_assertions(assertion_dir: str,
         account_file.write(out)
 
 
+def is_self_contained(snap_info: dict[str, Any]) -> bool:
+    snap_type = snap_info.get('type', '')
+    return snap_type in ['base', 'snapd']
+
+
 def preseed_snap(
         snap: str, channel: str, classic: bool,
         snap_installed: dict[str, list[dict[str, Union[str, bool]]]],
@@ -112,11 +117,24 @@ def preseed_snap(
     assertion_dir = f'{seed_dir}/assertions'
     snap_dir = f'{seed_dir}/snaps'
 
+    os.environ['UBUNTU_STORE_ARCH'] = 'amd64'
+    os.environ['SNAPPY_STORE_NO_CDN'] = '1'
+
     if preseeded(snap, snap_dir):
         return
 
-    os.environ['UBUNTU_STORE_ARCH'] = 'amd64'
-    os.environ['SNAPPY_STORE_NO_CDN'] = '1'
+    info = get_info(snap)
+
+    # install the snap base if this snap is not a base
+    if not is_self_contained(info) and 'base' in info:
+        preseed_snap(
+                info['base'],
+                'stable', False, snap_installed, mount_dir)
+    # we don't want to install the snap if it depends on "core"
+    elif not is_self_contained(info) and 'base' not in info:
+        print(f"WARN: legacy snap with no base declaration found ({snap}), refusing to install 'core' snap") # noqa
+        os.chdir(cwd)
+        return
 
     commands.run([
         'snap', 'download', f'--channel={channel}', snap
@@ -127,11 +145,6 @@ def preseed_snap(
         if f.endswith('.snap'):
             snap_file = f
             shutil.move(f, snap_dir)
-            info = get_info(f)
-            if 'base' in info:
-                preseed_snap(
-                        info['base'],
-                        'stable', False, snap_installed, mount_dir)
         elif f.endswith('.assert'):
             shutil.move(f, assertion_dir)
 
