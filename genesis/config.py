@@ -1,6 +1,8 @@
 import yaml
 
-DEFAULT_MIRROR='http://archive.ubuntu.com/ubuntu/'
+
+DEFAULT_MIRROR = 'http://archive.ubuntu.com/ubuntu/'
+
 
 class Config():
     series: str

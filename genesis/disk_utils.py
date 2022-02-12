@@ -2,6 +2,7 @@ import tempfile
 
 import genesis.commands as commands
 
+
 def create_empty_disk(size: int) -> str:
     """
     Create an empty disk image
@@ -17,7 +18,7 @@ def create_empty_disk(size: int) -> str:
     return disk_path
 
 
-def partition_disk(disk_image_path: str) -> None:
+def partition_uefi_disk(disk_image_path: str) -> None:
     """
     Partition the disk image. TODO: return the partition numbers
     """
@@ -86,4 +87,3 @@ def format_partition(
         format_vfat_partition(device, label)
     else:
         raise ValueError(f'partition type {partition_format} unsupported')
-

@@ -1,11 +1,7 @@
 import os
-import subprocess
 import tempfile
 import click
-import yaml
 import shutil
-
-from typing import Any
 
 import genesis.snaps as snaps
 import genesis.commands as commands
@@ -39,10 +35,6 @@ def deboostrap(conf: config.Config, build_dir_path: str) -> None:
                   conf.series,
                   build_dir_path,
                   conf.mirror])
-
-
-def add_build_ppas(ppas: list[str]):
-    pass
 
 
 def install_extra_packages(packages: list[str]):
@@ -182,7 +174,8 @@ def mount_virtual_filesystems(mount_dir):
     commands.run(['mount', 'dev-live', '-t', 'devtmpfs', f'{mount_dir}/dev'])
     commands.run(['mount', 'proc-live', '-t', 'proc', f'{mount_dir}/proc'])
     commands.run(['mount', 'sysfs-live', '-t', 'sysfs', f'{mount_dir}/sys'])
-    commands.run(['mount', 'securityfs', '-t', 'securityfs', f'{mount_dir}/sys/kernel/security'])
+    commands.run([
+        'mount', 'securityfs', '-t', 'securityfs', f'{mount_dir}/sys/kernel/security'])
     commands.run(['mount', '-t', 'cgroup2', 'none', f'{mount_dir}/sys/fs/cgroup'])
     commands.run(['mount', '-t', 'tmpfs', 'none', f'{mount_dir}/tmp'])
     commands.run(['mount', '-t', 'tmpfs', 'none', f'{mount_dir}/var/lib/apt'])
@@ -231,40 +224,74 @@ def cleanup(build_state: BuildState, debug: bool):
 @click.command()
 @click.option('--config-file', '-c', type=str, required=True)
 @click.option('--debug', is_flag=True, default=False)
-def main(config_file: str, debug: bool) -> None:
+@click.option('--disk', '-d', type=str, required=False, default=None)
+def main(config_file: str, debug: bool, disk: str) -> None:
     conf = config.Config(config_file)
     build_state = BuildState()
 
+    # if the user provides the disk, let's not remove it at the end
+    if disk is not None:
+        debug = True
+
     try:
-        build(conf, build_state)
+        build(conf, build_state, disk_path=disk)
     finally:
         cleanup(build_state, debug)
 
 
-def build(conf: config.Config, state: BuildState):
-    disk_image = disk_utils.create_empty_disk(conf.image_size)
-    state.disk_image = disk_image
+class UEFIDisk:
+    path: str
+    loop_device: str
+    esp_partition_number: int
+    rootfs_partition_number: int
 
-    disk_utils.partition_disk(disk_image)
-    loop_device = setup_loop_device(disk_image)
-    state.loop_to_detach.append(loop_device)
+    def __init__(self, size: int, path: str = None) -> None:
+        """
+        Create an empty disk image file with the right partition layout.
+        If a disk path is supplied, only attach loop devices (we assume the disk
+        has already been setup).
+        """
+        self.rootfs_partition_number = 1
+        self.esp_partition_number = 15
 
-    rootfs_part_device = f'/dev/mapper/{loop_device}p1'
-    esp_part_device = f'/dev/mapper/{loop_device}p15'
+        if path is not None:
+            self.path = path
+            self.loop_device = setup_loop_device(self.path)
+            return
 
-    disk_utils.format_partition(rootfs_part_device, partition_format='ext4')
-    disk_utils.format_partition(
-            esp_part_device, partition_format='vfat', label='UEFI')
+        self.path = disk_utils.create_empty_disk(size)
+        disk_utils.partition_uefi_disk(self.path)
+        self.loop_device = setup_loop_device(self.path)
+
+        disk_utils.format_partition(
+            self.rootfs_map_device(), partition_format='ext4')
+        disk_utils.format_partition(
+                self.esp_map_device(), partition_format='vfat', label='UEFI')
+
+    def rootfs_map_device(self) -> str:
+        return f'/dev/mapper/{self.loop_device}p{self.rootfs_partition_number}'
+
+    def esp_map_device(self) -> str:
+        return f'/dev/mapper/{self.loop_device}p{self.esp_partition_number}'
+
+
+def build(conf: config.Config, state: BuildState, disk_path: str = None):
+    """
+    High level build steps
+    """
+    disk = UEFIDisk(conf.image_size, disk_path)
+    state.disk_image = disk.path
+    state.loop_to_detach.append(disk.loop_device)
 
     mount_dir = tempfile.mkdtemp(prefix='genesis')
-    mount_partition(rootfs_part_device, mount_dir)
+    mount_partition(disk.rootfs_map_device(), mount_dir)
     state.directories_to_umount.append(mount_dir)
     state.files_to_delete.append(mount_dir)
 
     deboostrap(conf, mount_dir)
 
     os.mkdir(f'{mount_dir}/boot/efi')
-    mount_partition(esp_part_device, f'{mount_dir}/boot/efi')
+    mount_partition(disk.esp_map_device(), f'{mount_dir}/boot/efi')
 
     mount_virtual_filesystems(mount_dir)
 
@@ -275,8 +302,6 @@ def build(conf: config.Config, state: BuildState):
 
     add_fstab_entry('LABEL=rootfs\t/\text4\tdefaults\t0\t1')
     add_fstab_entry('LABEL=UEFI\t/boot/efi\tvfat\tumask=0077\t0\t1')
-
-    add_build_ppas(conf.build_ppas)
 
     setup_source_list(conf.mirror, conf.series)
 
@@ -296,7 +321,7 @@ def build(conf: config.Config, state: BuildState):
     os.chroot(mount_dir)
     state.in_chroot = True
 
-    install_bootloader(conf.bootloader, f'/dev/{loop_device}')
+    install_bootloader(conf.bootloader, f'/dev/{disk.loop_device}')
 
     exit_chroot()
     state.in_chroot = False
@@ -304,10 +329,10 @@ def build(conf: config.Config, state: BuildState):
     snaps.preseed(conf.snaps, mount_dir)
 
     if conf.binary_format != 'raw':
-        convert_binary_image(disk_image, conf.binary_format, conf.out_path)
-        os.remove(disk_image)
+        convert_binary_image(disk.path, conf.binary_format, conf.out_path)
+        os.remove(disk.path)
     else:
-        shutil.move(disk_image, conf.out_path)
+        shutil.move(disk.path, conf.out_path)
 
     state.success = True
 
