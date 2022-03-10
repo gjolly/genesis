@@ -2,6 +2,7 @@ import os
 import tempfile
 import click
 import shutil
+import requests
 
 import genesis.snaps as snaps
 import genesis.commands as commands
@@ -30,14 +31,15 @@ class BuildState():
         self.success = False
 
 
-def deboostrap(conf: config.Config, build_dir_path: str) -> None:
+def run_deboostrap(series: str, bootstrap_mirror: str, build_dir_path: str) -> None:
     commands.run(['/usr/sbin/debootstrap',
-                  conf.series,
+                  series,
                   build_dir_path,
-                  conf.mirror])
+                  bootstrap_mirror])
 
 
 def install_extra_packages(packages: list[str]):
+    commands.run(['/usr/bin/apt-get', 'update'])
     commands.run(['/usr/bin/apt-get', 'install', '-y'] + packages)
 
 
@@ -170,7 +172,7 @@ def setup_source_list(mirror: str, series: str) -> None:
     f.close()
 
 
-def mount_virtual_filesystems(mount_dir):
+def mount_virtual_filesystems(mount_dir: str) -> None:
     commands.run(['mount', 'dev-live', '-t', 'devtmpfs', f'{mount_dir}/dev'])
     commands.run(['mount', 'proc-live', '-t', 'proc', f'{mount_dir}/proc'])
     commands.run(['mount', 'sysfs-live', '-t', 'sysfs', f'{mount_dir}/sys'])
@@ -182,11 +184,23 @@ def mount_virtual_filesystems(mount_dir):
     commands.run(['mount', '-t', 'tmpfs', 'none', f'{mount_dir}/var/cache/apt'])
 
 
+def copy_directory(src: str, dest: str) -> None:
+    commands.run(['cp', '-a', f'{src}/.', dest])
+
+
 def copy_extra_files(mount_dir: str, files: dict[str, str]) -> None:
     for dest, local in files.items():
         print(f'COPYING {local} -> {dest}')
 
         shutil.copy(local, f'{mount_dir}{dest}')
+
+
+def download_file(url: str, path) -> None:
+    with requests.get(url, stream=True) as r:
+        r.raise_for_status()
+        with open(path, 'wb') as f:
+            for chunk in r.iter_content(chunk_size=8192):
+                f.write(chunk)
 
 
 def convert_binary_image(
@@ -221,52 +235,43 @@ def cleanup(build_state: BuildState, debug: bool):
         print(f'disk image kept for inspection: {build_state.disk_image}')
 
 
-@click.command()
-@click.option('--config-file', '-c', type=str, required=True)
-@click.option('--debug', is_flag=True, default=False)
-@click.option('--disk', '-d', type=str, required=False, default=None)
-def main(config_file: str, debug: bool, disk: str) -> None:
-    conf = config.Config(config_file)
-    build_state = BuildState()
-
-    # if the user provides the disk, let's not remove it at the end
-    if disk is not None:
-        debug = True
-
-    try:
-        build(conf, build_state, disk_path=disk)
-    finally:
-        cleanup(build_state, debug)
-
-
 class UEFIDisk:
     path: str
     loop_device: str
     esp_partition_number: int
     rootfs_partition_number: int
 
-    def __init__(self, size: int, path: str = None) -> None:
+    @classmethod
+    def create(cls, size: int):
         """
         Create an empty disk image file with the right partition layout.
         If a disk path is supplied, only attach loop devices (we assume the disk
         has already been setup).
         """
-        self.rootfs_partition_number = 1
-        self.esp_partition_number = 15
+        disk = cls()
+        disk.rootfs_partition_number = 1
+        disk.esp_partition_number = 15
 
-        if path is not None:
-            self.path = path
-            self.loop_device = setup_loop_device(self.path)
-            return
-
-        self.path = disk_utils.create_empty_disk(size)
-        disk_utils.partition_uefi_disk(self.path)
-        self.loop_device = setup_loop_device(self.path)
+        disk.path = disk_utils.create_empty_disk(size)
+        disk_utils.partition_uefi_disk(disk.path)
+        disk.loop_device = setup_loop_device(disk.path)
 
         disk_utils.format_partition(
-            self.rootfs_map_device(), partition_format='ext4')
+            disk.rootfs_map_device(), partition_format='ext4')
         disk_utils.format_partition(
-                self.esp_map_device(), partition_format='vfat', label='UEFI')
+                disk.esp_map_device(), partition_format='vfat', label='UEFI')
+
+        return disk
+
+    @classmethod
+    def from_disk_image(cls, path: str):
+        disk = UEFIDisk()
+        disk.rootfs_partition_number = 1
+        disk.esp_partition_number = 15
+        disk.path = path
+        disk.loop_device = setup_loop_device(disk.path)
+
+        return disk
 
     def rootfs_map_device(self) -> str:
         return f'/dev/mapper/{self.loop_device}p{self.rootfs_partition_number}'
@@ -288,7 +293,7 @@ def build(conf: config.Config, state: BuildState, disk_path: str = None):
     state.directories_to_umount.append(mount_dir)
     state.files_to_delete.append(mount_dir)
 
-    deboostrap(conf, mount_dir)
+    run_deboostrap(conf, mount_dir)
 
     os.mkdir(f'{mount_dir}/boot/efi')
     mount_partition(disk.esp_map_device(), f'{mount_dir}/boot/efi')
@@ -339,5 +344,160 @@ def build(conf: config.Config, state: BuildState, disk_path: str = None):
     os.close(SYSTEM_ROOT)
 
 
+@click.group()
+def cli() -> None:
+    pass
+
+
+@cli.command()
+@click.option('--output',
+              type=str,
+              default='rootfs',
+              required=True)
+@click.option('--series',
+              type=str,
+              required=True)
+@click.option('--mirror',
+              type=str,
+              default='http://archive.ubuntu.com/ubuntu',
+              required=True)
+@click.option('--hostname',
+              type=str,
+              default='ubuntu',
+              required=True)
+def debootstrap(output: str, series: str, mirror: str, hostname: str):
+    os.mkdir(output)
+    run_deboostrap(series, mirror, output)
+
+    f = open(f'{output}/etc/hostname', 'w')
+    f.write(hostname)
+
+
+@cli.command()
+@click.option('--rootfs-dir',
+              type=str,
+              default='rootfs',
+              required=True)
+@click.option('--disk-image',
+              type=str,
+              default='disk.img',
+              required=True)
+@click.option('--size',
+              type=int,
+              default=3,
+              required=True)
+def create_disk(rootfs_dir: str, disk_image: str, size: int):
+    disk = UEFIDisk(size)
+    mount_dir = tempfile.mkdtemp(prefix='genesis')
+    mount_partition(disk.rootfs_map_device(), mount_dir)
+
+    copy_directory(rootfs_dir, mount_dir)
+
+    os.mkdir(f'{mount_dir}/boot/efi')
+    mount_partition(disk.esp_map_device(), f'{mount_dir}/boot/efi')
+    mount_virtual_filesystems(mount_dir)
+
+    os.chroot(mount_dir)
+
+    add_fstab_entry('LABEL=rootfs\t/\text4\tdefaults\t0\t1')
+    add_fstab_entry('LABEL=UEFI\t/boot/efi\tvfat\tumask=0077\t0\t1')
+
+    exit_chroot()
+    umount_all(mount_dir)
+    teardown_loop_device(disk.loop_device)
+
+    shutil.move(disk.path, disk_image)
+
+
+@cli.command()
+@click.option('--disk-image',
+              type=str,
+              default='disk.img',
+              required=True)
+@click.option('--mirror',
+              type=str,
+              default='http://archive.ubuntu.com/ubuntu',
+              required=True)
+@click.option('--series',
+              type=str,
+              required=True)
+@click.option('--extra-package',
+              multiple=True)
+def update_system(disk_image: str, mirror: str, series: str,
+                  extra_package: list[str]):
+    disk = UEFIDisk.from_disk_image(disk_image)
+
+    mount_dir = tempfile.mkdtemp(prefix='genesis')
+    mount_partition(disk.rootfs_map_device(), mount_dir)
+    mount_partition(disk.esp_map_device(), f'{mount_dir}/boot/efi')
+    mount_virtual_filesystems(mount_dir)
+
+    os.chroot(mount_dir)
+
+    os.environ['DEBIAN_FRONTEND'] = 'noninteractive'
+
+    setup_source_list(mirror, series)
+    do_system_update()
+
+    install_extra_packages(list(extra_package))
+
+    exit_chroot()
+    umount_all(mount_dir)
+    teardown_loop_device(disk.loop_device)
+    os.rmdir(mount_dir)
+
+
+@cli.command()
+@click.option('--disk-image',
+              type=str,
+              default='disk.img',
+              required=True)
+@click.option('--files',
+              multiple=True)
+def copy_files(disk_image: str, files: list[str]):
+    disk = UEFIDisk.from_disk_image(disk_image)
+
+    mount_dir = tempfile.mkdtemp(prefix='genesis')
+    mount_partition(disk.rootfs_map_device(), mount_dir)
+    mount_partition(disk.esp_map_device(), f'{mount_dir}/boot/efi')
+    mount_virtual_filesystems(mount_dir)
+
+    os.chroot(mount_dir)
+
+    for file_url in files:
+        path, url = file_url.split(':')
+        download_file(url, path)
+
+    exit_chroot()
+    umount_all(mount_dir)
+    teardown_loop_device(disk.loop_device)
+    os.rmdir(mount_dir)
+
+
+@cli.command('install-grub')
+@click.option('--disk-image',
+              type=str,
+              default='disk.img',
+              required=True)
+def install_grub_command(disk_image: str):
+    disk = UEFIDisk.from_disk_image(disk_image)
+
+    mount_dir = tempfile.mkdtemp(prefix='genesis')
+    mount_partition(disk.rootfs_map_device(), mount_dir)
+    mount_partition(disk.esp_map_device(), f'{mount_dir}/boot/efi')
+    mount_virtual_filesystems(mount_dir)
+
+    os.chroot(mount_dir)
+
+    grub_conf_url = 'https://gist.githubusercontent.com/gjolly/14ed79fa5323a1d7a7f653f8dda60921/raw/8df1830c1ce6aa80b23515d9420c9afdc987ee1d/extra-grub-config.cfg' # noqa
+    download_file(grub_conf_url, '/etc/default/grub.d/extra-grub-config.cfg')
+    install_bootloader('grub', f'/dev/{disk.loop_device}')
+
+    exit_chroot()
+    umount_all(mount_dir)
+    teardown_loop_device(disk.loop_device)
+    os.rmdir(mount_dir)
+
+
 if __name__ == '__main__':
-    main()
+    cli()
