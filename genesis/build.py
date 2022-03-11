@@ -7,9 +7,7 @@ import click
 import requests
 
 import genesis.commands as commands
-import genesis.config as config
 import genesis.disk_utils as disk_utils
-import genesis.snaps as snaps
 
 SYSTEM_ROOT = os.open("/", os.O_RDONLY)
 CWD = os.getcwd()
@@ -287,70 +285,6 @@ class UEFIDisk:
         return f"/dev/mapper/{self.loop_device}p{self.esp_partition_number}"
 
 
-def build(conf: config.Config, state: BuildState, disk_path: str = None):
-    """
-    High level build steps
-    """
-    disk = UEFIDisk(conf.image_size, disk_path)
-    state.disk_image = disk.path
-    state.loop_to_detach.append(disk.loop_device)
-
-    mount_dir = tempfile.mkdtemp(prefix="genesis")
-    mount_partition(disk.rootfs_map_device(), mount_dir)
-    state.directories_to_umount.append(mount_dir)
-    state.files_to_delete.append(mount_dir)
-
-    run_deboostrap(conf, mount_dir)
-
-    os.mkdir(f"{mount_dir}/boot/efi")
-    mount_partition(disk.esp_map_device(), f"{mount_dir}/boot/efi")
-
-    mount_virtual_filesystems(mount_dir)
-
-    os.chroot(mount_dir)
-    state.in_chroot = True
-
-    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-
-    add_fstab_entry("LABEL=rootfs\t/\text4\tdefaults\t0\t1")
-    add_fstab_entry("LABEL=UEFI\t/boot/efi\tvfat\tumask=0077\t0\t1")
-
-    setup_source_list(conf.mirror, conf.series)
-
-    do_system_update()
-
-    # make sure we install snapd if snap preseeding is neededj
-    if len(conf.snaps) > 0 and "snapd" not in conf.extra_packages:
-        conf.extra_packages.append("snapd")
-
-    install_extra_packages(conf.extra_packages)
-
-    exit_chroot()
-    state.in_chroot = False
-
-    copy_extra_files(mount_dir, conf.files)
-
-    os.chroot(mount_dir)
-    state.in_chroot = True
-
-    install_bootloader(conf.bootloader, f"/dev/{disk.loop_device}")
-
-    exit_chroot()
-    state.in_chroot = False
-
-    snaps.preseed(conf.snaps, mount_dir)
-
-    if conf.binary_format != "raw":
-        convert_binary_image(disk.path, conf.binary_format, conf.out_path)
-        os.remove(disk.path)
-    else:
-        shutil.move(disk.path, conf.out_path)
-
-    state.success = True
-
-    os.close(SYSTEM_ROOT)
-
-
 @click.group()
 def cli() -> None:
     pass
@@ -376,7 +310,7 @@ def debootstrap(output: str, series: str, mirror: str, hostname: str):
 @click.option("--disk-image", type=str, default="disk.img", required=True)
 @click.option("--size", type=int, default=3, required=True)
 def create_disk(rootfs_dir: str, disk_image: str, size: int):
-    disk = UEFIDisk(size)
+    disk = UEFIDisk.create(size)
     mount_dir = tempfile.mkdtemp(prefix="genesis")
     mount_partition(disk.rootfs_map_device(), mount_dir)
 
