@@ -1,17 +1,16 @@
 import os
 import pathlib
-import yaml
-import tempfile
 import shutil
+import tempfile
+from typing import Any, Union, Dict, List
 
-from typing import Any, Union
+import yaml
 
 import genesis.commands as commands
 
-def get_info(snap: str) -> dict[str, Any]:
-    snap_info_raw = commands.run_and_save_output([
-        'snap', 'info', '--verbose', snap
-        ])
+
+def get_info(snap: str) -> Dict[str, Any]:
+    snap_info_raw = commands.run_and_save_output(["snap", "info", "--verbose", snap])
 
     snap_info = yaml.safe_load(snap_info_raw)
 
@@ -28,9 +27,7 @@ def preseeded(snap: str, snap_dir: str) -> bool:
 
 
 def create_directory(directory: str) -> None:
-    pathlib.Path(
-        directory
-    ).mkdir(parents=True, exist_ok=True)
+    pathlib.Path(directory).mkdir(parents=True, exist_ok=True)
 
 
 def delete_signature(content: str) -> str:
@@ -48,59 +45,70 @@ def delete_signature(content: str) -> str:
     The last part will be removed
     """
 
-    split_content = content.split('\n\n')
+    split_content = content.split("\n\n")
 
     return split_content[0]
 
 
-def prepare_assertions(assertion_dir: str,
-        brand: str = 'generic',
-        model: str = 'generic-classic'):
-    model_path = f'{assertion_dir}/model'
-    account_key_path = f'{assertion_dir}/account-key'
-    account_path = f'{assertion_dir}/account'
+def prepare_assertions(
+    assertion_dir: str, brand: str = "generic", model: str = "generic-classic"
+):
+    model_path = f"{assertion_dir}/model"
+    account_key_path = f"{assertion_dir}/account-key"
+    account_path = f"{assertion_dir}/account"
 
-    out = commands.run_and_save_output([
-        'snap', 'known', '--remote', 'model',
-        'series=16', f'model={model}', f'brand-id={brand}'])
+    out = commands.run_and_save_output(
+        [
+            "snap",
+            "known",
+            "--remote",
+            "model",
+            "series=16",
+            f"model={model}",
+            f"brand-id={brand}",
+        ]
+    )
 
-    with open(model_path, 'w') as model_file:
+    with open(model_path, "w") as model_file:
         model_file.write(out)
 
     content = delete_signature(out)
 
     model_obj = yaml.safe_load(content)
-    key = model_obj['sign-key-sha3-384']
+    key = model_obj["sign-key-sha3-384"]
 
-    out = commands.run_and_save_output([
-        'snap', 'known', '--remote', 'account-key',
-        f'public-key-sha3-384={key}'])
+    out = commands.run_and_save_output(
+        ["snap", "known", "--remote", "account-key", f"public-key-sha3-384={key}"]
+    )
 
-    with open(account_key_path, 'w') as account_key_file:
+    with open(account_key_path, "w") as account_key_file:
         account_key_file.write(out)
 
-    #snap known --remote account account-id=$account
+    # snap known --remote account account-id=$account
     content = delete_signature(out)
     account_obj = yaml.safe_load(content)
-    account_id = account_obj['account-id']
+    account_id = account_obj["account-id"]
 
-    out = commands.run_and_save_output([
-        'snap', 'known', '--remote', 'account',
-        f'account-id={account_id}'])
+    out = commands.run_and_save_output(
+        ["snap", "known", "--remote", "account", f"account-id={account_id}"]
+    )
 
-    with open(account_path, 'w') as account_file:
+    with open(account_path, "w") as account_file:
         account_file.write(out)
 
 
-def is_self_contained(snap_info: dict[str, Any]) -> bool:
-    snap_type = snap_info.get('type', '')
-    return snap_type in ['base', 'snapd']
+def is_self_contained(snap_info: Dict[str, Any]) -> bool:
+    snap_type = snap_info.get("type", "")
+    return snap_type in ["base", "snapd"]
 
 
 def preseed_snap(
-        snap: str, channel: str, classic: bool,
-        snap_installed: dict[str, list[dict[str, Union[str, bool]]]],
-        mount_dir: str) -> None:
+    snap: str,
+    channel: str,
+    classic: bool,
+    snap_installed: Dict[str, List[Dict[str, Union[str, bool]]]],
+    mount_dir: str,
+) -> None:
     """
     Pre-install a snap on the system. Also check what its snap base is
     and pre-install it if needed.
@@ -113,12 +121,12 @@ def preseed_snap(
     workdir = tempfile.TemporaryDirectory()
     os.chdir(workdir.name)
 
-    seed_dir = f'{mount_dir}/var/lib/snapd/seed'
-    assertion_dir = f'{seed_dir}/assertions'
-    snap_dir = f'{seed_dir}/snaps'
+    seed_dir = f"{mount_dir}/var/lib/snapd/seed"
+    assertion_dir = f"{seed_dir}/assertions"
+    snap_dir = f"{seed_dir}/snaps"
 
-    os.environ['UBUNTU_STORE_ARCH'] = 'amd64'
-    os.environ['SNAPPY_STORE_NO_CDN'] = '1'
+    os.environ["UBUNTU_STORE_ARCH"] = "amd64"
+    os.environ["SNAPPY_STORE_NO_CDN"] = "1"
 
     if preseeded(snap, snap_dir):
         return
@@ -126,48 +134,48 @@ def preseed_snap(
     info = get_info(snap)
 
     # install the snap base if this snap is not a base
-    if not is_self_contained(info) and 'base' in info:
-        preseed_snap(
-                info['base'],
-                'stable', False, snap_installed, mount_dir)
+    if not is_self_contained(info) and "base" in info:
+        preseed_snap(info["base"], "stable", False, snap_installed, mount_dir)
     # we don't want to install the snap if it depends on "core"
-    elif not is_self_contained(info) and 'base' not in info:
-        print(f"WARN: legacy snap with no base declaration found ({snap}), refusing to install 'core' snap") # noqa
+    elif not is_self_contained(info) and "base" not in info:
+        print(
+            f"WARN: legacy snap with no base declaration found ({snap}), refusing to install 'core' snap"
+        )  # noqa
         os.chdir(cwd)
         return
 
-    commands.run([
-        'snap', 'download', f'--channel={channel}', snap
-        ])
+    commands.run(["snap", "download", f"--channel={channel}", snap])
 
     files = os.listdir(workdir.name)
     for f in files:
-        if f.endswith('.snap'):
+        if f.endswith(".snap"):
             snap_file = f
             shutil.move(f, snap_dir)
-        elif f.endswith('.assert'):
+        elif f.endswith(".assert"):
             shutil.move(f, assertion_dir)
 
-    snap_installed['snaps'].append({
-        'name': snap,
-        'channel': channel,
-        'file': snap_file,
-        'classic': classic,
-    })
+    snap_installed["snaps"].append(
+        {
+            "name": snap,
+            "channel": channel,
+            "file": snap_file,
+            "classic": classic,
+        }
+    )
 
     os.chdir(cwd)
 
 
-def preseed(snaps: dict[str, dict[str, str]], mount_dir: str):
+def preseed(snaps: Dict[str, Dict[str, str]], mount_dir: str):
     """
     Pre-install snaps on the image
     """
     if len(snaps) == 0:
         return
 
-    seed_dir = f'{mount_dir}/var/lib/snapd/seed'
-    assertion_dir = f'{seed_dir}/assertions'
-    snap_dir = f'{seed_dir}/snaps'
+    seed_dir = f"{mount_dir}/var/lib/snapd/seed"
+    assertion_dir = f"{seed_dir}/assertions"
+    snap_dir = f"{seed_dir}/snaps"
 
     create_directory(seed_dir)
     create_directory(assertion_dir)
@@ -175,26 +183,21 @@ def preseed(snaps: dict[str, dict[str, str]], mount_dir: str):
 
     prepare_assertions(assertion_dir)
 
-    seed_yaml = f'{mount_dir}/var/lib/snapd/seed/seed.yaml'
-    snaps_installed: dict[str, list[dict[str, Union[str, bool]]]] = {
-            'snaps': []}
+    seed_yaml = f"{mount_dir}/var/lib/snapd/seed/seed.yaml"
+    snaps_installed: Dict[str, List[Dict[str, Union[str, bool]]]] = {"snaps": []}
 
     # just install snapd, we could avoid that if there was
     # no snap with bases >= core18 but we are lazy
-    if 'snapd' not in snaps:
-        snaps['snapd'] = {
-            'channel': 'stable',
-            'classic': 'false'
-        }
+    if "snapd" not in snaps:
+        snaps["snapd"] = {"channel": "stable", "classic": "false"}
 
     for snap, spec in snaps.items():
-        classic = True if 'classic' in spec and spec['classic'] else False
-        preseed_snap(
-                snap, spec['channel'], classic, snaps_installed, mount_dir)
+        classic = True if "classic" in spec and spec["classic"] else False
+        preseed_snap(snap, spec["channel"], classic, snaps_installed, mount_dir)
 
     snap_seed_yaml = yaml.dump(snaps_installed)
-    with open(seed_yaml, 'w') as seed:
+    with open(seed_yaml, "w") as seed:
         seed.write(snap_seed_yaml)
 
     # validate the seed file we just written
-    commands.run(['snap', 'debug', 'validate-seed', seed_yaml])
+    commands.run(["snap", "debug", "validate-seed", seed_yaml])
