@@ -315,10 +315,7 @@ def create_disk(rootfs_dir: str, disk_image: str, size: int):
     mount_partition(disk.rootfs_map_device(), mount_dir)
 
     copy_directory(rootfs_dir, mount_dir)
-
     os.mkdir(f"{mount_dir}/boot/efi")
-    mount_partition(disk.esp_map_device(), f"{mount_dir}/boot/efi")
-    mount_virtual_filesystems(mount_dir)
 
     os.chroot(mount_dir)
 
@@ -326,6 +323,7 @@ def create_disk(rootfs_dir: str, disk_image: str, size: int):
     add_fstab_entry("LABEL=UEFI\t/boot/efi\tvfat\tumask=0077\t0\t1")
 
     exit_chroot()
+
     umount_all(mount_dir)
     teardown_loop_device(disk.loop_device)
 
