@@ -35,6 +35,7 @@ def run_deboostrap(series: str, bootstrap_mirror: str, build_dir_path: str) -> N
 
 
 def install_extra_packages(packages: List[str]):
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     commands.run(["/usr/bin/apt-get", "update"])
     commands.run(["/usr/bin/apt-get", "install", "-y"] + packages)
 
@@ -195,7 +196,7 @@ def copy_extra_files(mount_dir: str, files: Dict[str, str]) -> None:
         shutil.copy(local, f"{mount_dir}{dest}")
 
 
-def download_file(url: str, path) -> None:
+def download_file(url: str, path: str) -> None:
     with requests.get(url, stream=True) as r:
         r.raise_for_status()
         with open(path, "wb") as f:
@@ -396,6 +397,7 @@ def install_grub_command(disk_image: str):
     os.chroot(mount_dir)
 
     grub_conf_url = "https://gist.githubusercontent.com/gjolly/14ed79fa5323a1d7a7f653f8dda60921/raw/8df1830c1ce6aa80b23515d9420c9afdc987ee1d/extra-grub-config.cfg"  # noqa
+    os.mkdir("/etc/default/grub.d")
     download_file(grub_conf_url, "/etc/default/grub.d/extra-grub-config.cfg")
     install_bootloader("grub", f"/dev/{disk.loop_device}")
 
