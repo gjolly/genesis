@@ -1,6 +1,7 @@
 import os
 import shutil
 import tempfile
+import time
 from typing import Dict, List
 
 import click
@@ -402,6 +403,7 @@ def install_grub_command(disk_image: str):
     install_bootloader("grub", f"/dev/{disk.loop_device}")
 
     exit_chroot()
+    time.sleep(30)
     umount_all(mount_dir)
     teardown_loop_device(disk.loop_device)
     os.rmdir(mount_dir)
