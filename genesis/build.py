@@ -14,23 +14,6 @@ SYSTEM_ROOT = os.open("/", os.O_RDONLY)
 CWD = os.getcwd()
 
 
-class BuildState:
-    directories_to_umount: List[str]
-    files_to_delete: List[str]
-    loop_to_detach: List[str]
-    in_chroot: bool
-    disk_image: str
-    success: bool
-
-    def __init__(self):
-        self.in_chroot = False
-        self.directories_to_umount = list()
-        self.files_to_delete = list()
-        self.loop_to_detach = list()
-        self.disk_image = list()
-        self.success = False
-
-
 def run_deboostrap(series: str, bootstrap_mirror: str, build_dir_path: str) -> None:
     commands.run(["/usr/sbin/debootstrap", series, build_dir_path, bootstrap_mirror])
 
@@ -218,28 +201,6 @@ def convert_binary_image(disk_image: str, binary_format: str, out_path: str) -> 
             out_path,
         ]
     )
-
-
-def cleanup(build_state: BuildState, debug: bool):
-    if build_state.in_chroot:
-        exit_chroot()
-
-    for mount in build_state.directories_to_umount:
-        umount_all(mount)
-
-    for device in build_state.loop_to_detach:
-        teardown_loop_device(device)
-
-    for f in build_state.files_to_delete:
-        if os.path.isdir(f):
-            os.rmdir(f)
-        else:
-            os.remove(f)
-
-    if not build_state.success and not debug:
-        os.remove(build_state.disk_image)
-    elif not build_state.success:
-        print(f"disk image kept for inspection: {build_state.disk_image}")
 
 
 class UEFIDisk:
