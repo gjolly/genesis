@@ -20,9 +20,7 @@ def run_deboostrap(series: str, bootstrap_mirror: str, build_dir_path: str) -> N
 def install_extra_packages(packages: List[str]):
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     commands.run(["/usr/bin/apt-get", "update"])
-    commands.run(
-        ["/usr/bin/apt-get", "install", "-y", "--no-install-recommends"] + packages
-    )
+    commands.run(["/usr/bin/apt-get", "install", "-y"] + packages)
 
 
 def do_system_update():
@@ -131,13 +129,14 @@ def install_grub(device: str) -> None:
             "--target=x86_64-efi",
             "--uefi-secure-boot",
             "--no-nvram",
-        ]
+        ],
+        cwd="/",
     )
 
-    commands.run(["grub-install", "--target=i386-pc", device])
+    commands.run(["grub-install", "--target=i386-pc", device], cwd="/")
 
     divert_grub()
-    commands.run(["update-grub"])
+    commands.run(["update-grub"], cwd="/")
 
     undivert_grub()
 
@@ -360,7 +359,11 @@ def install_grub_command(disk_image: str, rootfs_label: str):
     mount_virtual_filesystems(mount_dir)
 
     grub_conf_url = "https://gist.githubusercontent.com/gjolly/14ed79fa5323a1d7a7f653f8dda60921/raw/8df1830c1ce6aa80b23515d9420c9afdc987ee1d/extra-grub-config.cfg"  # noqa
-    os.mkdir(f"{mount_dir}/etc/default/grub.d")
+
+    grub_config_dir = f"{mount_dir}/etc/default/grub.d"
+    if not os.path.exists(grub_config_dir):
+        os.mkdir(grub_config_dir)
+
     download_file(
         grub_conf_url, f"{mount_dir}/etc/default/grub.d/extra-grub-config.cfg"
     )

@@ -3,11 +3,14 @@ import subprocess
 from typing import List
 
 
-def run(cmd: List[str]) -> None:
+def run(cmd: List[str], cwd: str = "") -> None:
     shell_form_cmd = " ".join(cmd)
     print(f">> {shell_form_cmd}")
 
-    proc = subprocess.Popen(cmd, shell=False)
+    process_cwd = None
+    if cwd != "":
+        process_cwd = cwd
+    proc = subprocess.Popen(cmd, cwd=process_cwd, shell=False)
 
     proc.communicate()
 
