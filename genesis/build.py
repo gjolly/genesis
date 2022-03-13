@@ -1,7 +1,6 @@
 import os
 import shutil
 import tempfile
-import time
 from typing import Dict, List
 
 import click
@@ -358,15 +357,17 @@ def install_grub_command(disk_image: str):
     mount_partition(disk.esp_map_device(), f"{mount_dir}/boot/efi")
     mount_virtual_filesystems(mount_dir)
 
+    grub_conf_url = "https://gist.githubusercontent.com/gjolly/14ed79fa5323a1d7a7f653f8dda60921/raw/8df1830c1ce6aa80b23515d9420c9afdc987ee1d/extra-grub-config.cfg"  # noqa
+    os.mkdir(f"{mount_dir}/etc/default/grub.d")
+    download_file(
+        grub_conf_url, f"{mount_dir}/etc/default/grub.d/extra-grub-config.cfg"
+    )
+
     os.chroot(mount_dir)
 
-    grub_conf_url = "https://gist.githubusercontent.com/gjolly/14ed79fa5323a1d7a7f653f8dda60921/raw/8df1830c1ce6aa80b23515d9420c9afdc987ee1d/extra-grub-config.cfg"  # noqa
-    os.mkdir("/etc/default/grub.d")
-    download_file(grub_conf_url, "/etc/default/grub.d/extra-grub-config.cfg")
     install_bootloader("grub", f"/dev/{disk.loop_device}")
 
     exit_chroot()
-    time.sleep(30)
     umount_all(mount_dir)
     teardown_loop_device(disk.loop_device)
     os.rmdir(mount_dir)
