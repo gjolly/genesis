@@ -138,6 +138,7 @@ def install_grub(device: str) -> None:
 
     divert_grub()
     commands.run(["update-grub"])
+
     undivert_grub()
 
 
@@ -348,8 +349,9 @@ def copy_files(disk_image: str, files: List[str]):
 
 
 @cli.command("install-grub")
-@click.option("--disk-image", type=str, default="disk.img", required=True)
-def install_grub_command(disk_image: str):
+@click.option("--disk-image", type=str, default="disk.img")
+@click.option("--rootfs-label", type=str, default="rootfs")
+def install_grub_command(disk_image: str, rootfs_label: str):
     disk = UEFIDisk.from_disk_image(disk_image)
 
     mount_dir = tempfile.mkdtemp(prefix="genesis")
@@ -368,6 +370,17 @@ def install_grub_command(disk_image: str):
     install_bootloader("grub", f"/dev/{disk.loop_device}")
 
     exit_chroot()
+
+    commands.run(
+        [
+            "sed",
+            "-i",
+            "-e",
+            f"s,root=[^ ]*,root=LABEL={rootfs_label},",
+            f"{mount_dir}/boot/grub/grub.cfg",
+        ]
+    )
+
     umount_all(mount_dir)
     teardown_loop_device(disk.loop_device)
     os.rmdir(mount_dir)
