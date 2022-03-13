@@ -21,7 +21,9 @@ def run_deboostrap(series: str, bootstrap_mirror: str, build_dir_path: str) -> N
 def install_extra_packages(packages: List[str]):
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     commands.run(["/usr/bin/apt-get", "update"])
-    commands.run(["/usr/bin/apt-get", "install", "-y"] + packages)
+    commands.run(
+        ["/usr/bin/apt-get", "install", "-y", "--no-install-recommends"] + packages
+    )
 
 
 def do_system_update():
