@@ -402,7 +402,7 @@ def install_packages(disk_image: str, package: List[str]):
 
     os.chroot(mount_dir)
 
-    install_extra_packages(package)
+    install_extra_packages(list(package))
 
     exit_chroot()
 
