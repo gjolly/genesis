@@ -389,5 +389,27 @@ def install_grub_command(disk_image: str, rootfs_label: str):
     os.rmdir(mount_dir)
 
 
+@cli.command()
+@click.option("--disk-image", type=str, default="disk.img")
+@click.option("--package", multiple=True)
+def install_packages(disk_image: str, package: List[str]):
+    disk = UEFIDisk.from_disk_image(disk_image)
+
+    mount_dir = tempfile.mkdtemp(prefix="genesis")
+    mount_partition(disk.rootfs_map_device(), mount_dir)
+    mount_partition(disk.esp_map_device(), f"{mount_dir}/boot/efi")
+    mount_virtual_filesystems(mount_dir)
+
+    os.chroot(mount_dir)
+
+    install_extra_packages(package)
+
+    exit_chroot()
+
+    umount_all(mount_dir)
+    teardown_loop_device(disk.loop_device)
+    os.rmdir(mount_dir)
+
+
 if __name__ == "__main__":
     cli()
