@@ -411,5 +411,42 @@ def install_packages(disk_image: str, package: List[str]):
     os.rmdir(mount_dir)
 
 
+@cli.command()
+@click.option("--disk-image", type=str, default="disk.img")
+@click.option("--username", type=str, default="ubuntu")
+@click.option("--ssh-key", type=str, required=True)
+def create_user(disk_image: str, username: str, ssh_key: str):
+    disk = UEFIDisk.from_disk_image(disk_image)
+
+    mount_dir = tempfile.mkdtemp(prefix="genesis")
+    mount_partition(disk.rootfs_map_device(), mount_dir)
+
+    os.chroot(mount_dir)
+
+    user_exists: bool = False
+    with open("/etc/passwd") as passwd:
+        lines = passwd.readlines()
+        users = [line.split(":")[0] for line in lines]
+        user_exists = username in users
+
+    if not user_exists:
+        commands.run(["adduser", "--quiet",
+                      "--shell", "/bin/bash",
+                      "--gecos", "''",
+                      "--disabled-password", username])
+
+    # TODO: we should use path.join here
+    home_dir = f"/home/{username}"
+    ssh_key_file = f"{home_dir}/authorized_keys"
+    with open(ssh_key_file, 'w') as key_file:
+        key_file.write(ssh_key)
+
+    exit_chroot()
+
+    umount_all(mount_dir)
+    teardown_loop_device(disk.loop_device)
+    os.rmdir(mount_dir)
+
+
 if __name__ == "__main__":
     cli()
