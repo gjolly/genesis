@@ -40,3 +40,12 @@ genesis update-system \
 # Finally, install grub
 genesis install-grub --disk-image jammy-disk.img
 ```
+
+You can now convert this raw image to QCOW2 (you will need `qemu-utils`):
+
+```bash
+qemu-img convert -f raw -O qcow2 jammy-disk.img jammy-disk.qcow2
+
+# and get rid of the raw image
+rm jammy-disk.img
+```
