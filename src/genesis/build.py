@@ -178,7 +178,12 @@ def copy_extra_files(mount_dir: str, files: Dict[str, str]) -> None:
     for dest, local in files.items():
         print(f"COPYING {local} -> {dest}")
 
-        shutil.copy(local, f"{mount_dir}{dest}")
+        dest = f"{mount_dir}{dest}"
+
+        directory = os.path.dirname(dest)
+        commands.run(['mkdir', '-p', directory])
+
+        shutil.copy(local, dest)
 
 
 def download_file(url: str, path: str) -> None:
@@ -326,8 +331,44 @@ def update_system(disk_image: str, mirror: str, series: str, extra_package: List
 
 @cli.command()
 @click.option("--disk-image", type=str, default="disk.img", required=True)
+@click.option("--file", multiple=True)
+@click.option("--owner", type=str, required=False)
+@click.option("--mod", type=str, required=False)
+def copy_files(disk_image: str, file: List[str], owner: str, mod: str):
+    files = file
+    disk = UEFIDisk.from_disk_image(disk_image)
+
+    mount_dir = tempfile.mkdtemp(prefix="genesis")
+    mount_partition(disk.rootfs_map_device(), mount_dir)
+    mount_partition(disk.esp_map_device(), f"{mount_dir}/boot/efi")
+    mount_virtual_filesystems(mount_dir)
+
+    file_map: Dict[str, str] = dict()
+    for file in files:
+        src, dst = file.split(':')
+        file_map[dst] = src
+
+    copy_extra_files(mount_dir, file_map)
+
+    os.chroot(mount_dir)
+
+    for dest in file_map:
+        if owner is not None:
+            shutil.chown(dest, owner, owner)
+        if mod is not None:
+            commands.run(['chmod', mod, dest])
+
+    exit_chroot()
+
+    umount_all(mount_dir)
+    teardown_loop_device(disk.loop_device)
+    os.rmdir(mount_dir)
+
+
+@cli.command()
+@click.option("--disk-image", type=str, default="disk.img", required=True)
 @click.option("--files", multiple=True)
-def copy_files(disk_image: str, files: List[str]):
+def download_files(disk_image: str, files: List[str]):
     disk = UEFIDisk.from_disk_image(disk_image)
 
     mount_dir = tempfile.mkdtemp(prefix="genesis")
@@ -414,8 +455,9 @@ def install_packages(disk_image: str, package: List[str]):
 @cli.command()
 @click.option("--disk-image", type=str, default="disk.img")
 @click.option("--username", type=str, default="ubuntu")
-@click.option("--ssh-key", type=str, required=True)
-def create_user(disk_image: str, username: str, ssh_key: str):
+@click.option("--ssh-key", type=str, required=False)
+@click.option('--sudo/--no-sudo', default=False)
+def create_user(disk_image: str, username: str, ssh_key: str, sudo: bool):
     disk = UEFIDisk.from_disk_image(disk_image)
 
     mount_dir = tempfile.mkdtemp(prefix="genesis")
@@ -435,11 +477,17 @@ def create_user(disk_image: str, username: str, ssh_key: str):
                       "--gecos", "''",
                       "--disabled-password", username])
 
-    # TODO: we should use path.join here
-    home_dir = f"/home/{username}"
-    ssh_key_file = f"{home_dir}/authorized_keys"
-    with open(ssh_key_file, 'w') as key_file:
-        key_file.write(ssh_key)
+    if ssh_key is not None:
+        # TODO: we should use path.join here
+        home_dir = f"/home/{username}"
+        commands.run(["mkdir", "-p", f"{home_dir}/.ssh"])
+
+        ssh_key_file = f"{home_dir}/.ssh/authorized_keys"
+        with open(ssh_key_file, 'w') as key_file:
+            key_file.write(ssh_key)
+
+    if sudo:
+        commands.run(["usermod", "-aG", "sudo", username])
 
     exit_chroot()
 
