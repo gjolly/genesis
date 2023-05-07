@@ -5,5 +5,35 @@ requires = [
 ]
 build-backend = "setuptools.build_meta"
 
-[tool.isort]
+[project]
+name = "genesis"
+version = "0.0.1"
+authors = [
+  {name = "Gauthier Jolly", email = "contact@gauthierjolly.com"},
+]
+description = "Tool to build ubuntu live images"
+readme = "README.md"
+url = https://github.com/gjolly/genesis
+project_urls =
+    Bug Tracker = https://github.com/gjolly/genesis/issues
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Linux",
+]
+
+dependencies = [
+    "click",
+    "pyyaml",
+    "requests",
+]
+
+[project.scripts]
+genesis = "genesis.build:cli"
+
+[flake8]
+max-line-length = 88
+extend-ignore = E203
+
+[isort]
 profile = "black"
