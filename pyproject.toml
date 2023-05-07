@@ -13,9 +13,6 @@ authors = [
 ]
 description = "Tool to build ubuntu live images"
 readme = "README.md"
-url = https://github.com/gjolly/genesis
-project_urls =
-    Bug Tracker = https://github.com/gjolly/genesis/issues
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
@@ -28,12 +25,16 @@ dependencies = [
     "requests",
 ]
 
+[project.urls]
+"Homepage" = "https://github.com/gjolly/genesis"
+"Bug Tracker" = "https://github.com/gjolly/genesis/issues"
+
 [project.scripts]
 genesis = "genesis.build:cli"
 
 [flake8]
 max-line-length = 88
-extend-ignore = E203
+extend-ignore = "E203"
 
 [isort]
 profile = "black"
