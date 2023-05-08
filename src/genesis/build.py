@@ -267,7 +267,7 @@ def debootstrap(output: str, series: str, mirror: str, hostname: str):
 @click.option("--size", type=int, default=3, required=True)
 def create_disk(rootfs_dir: str, disk_image: str, size: int):
     disk = UEFIDisk.create(size)
-    mount_dir = tempfile.mkdtemp(prefix="genesis")
+    mount_dir = tempfile.mkdtemp(prefix="genesis-build")
     mount_partition(disk.rootfs_map_device(), mount_dir)
 
     copy_directory(rootfs_dir, mount_dir)
@@ -282,6 +282,7 @@ def create_disk(rootfs_dir: str, disk_image: str, size: int):
 
     umount_all(mount_dir)
     teardown_loop_device(disk.loop_device)
+    os.rmdir(mount_dir)
 
     shutil.move(disk.path, disk_image)
 
@@ -294,7 +295,7 @@ def create_disk(rootfs_dir: str, disk_image: str, size: int):
 def update_system(disk_image: str, mirror: str, series: str, extra_package: List[str]):
     disk = UEFIDisk.from_disk_image(disk_image)
 
-    mount_dir = tempfile.mkdtemp(prefix="genesis")
+    mount_dir = tempfile.mkdtemp(prefix="genesis-build")
     mount_partition(disk.rootfs_map_device(), mount_dir)
     mount_partition(disk.esp_map_device(), f"{mount_dir}/boot/efi")
     mount_virtual_filesystems(mount_dir)
@@ -323,7 +324,7 @@ def copy_files(disk_image: str, file: List[str], owner: str, mod: str):
     files = file
     disk = UEFIDisk.from_disk_image(disk_image)
 
-    mount_dir = tempfile.mkdtemp(prefix="genesis")
+    mount_dir = tempfile.mkdtemp(prefix="genesis-build")
     mount_partition(disk.rootfs_map_device(), mount_dir)
     mount_partition(disk.esp_map_device(), f"{mount_dir}/boot/efi")
     mount_virtual_filesystems(mount_dir)
@@ -356,7 +357,7 @@ def copy_files(disk_image: str, file: List[str], owner: str, mod: str):
 def download_files(disk_image: str, files: List[str]):
     disk = UEFIDisk.from_disk_image(disk_image)
 
-    mount_dir = tempfile.mkdtemp(prefix="genesis")
+    mount_dir = tempfile.mkdtemp(prefix="genesis-build")
     mount_partition(disk.rootfs_map_device(), mount_dir)
     mount_partition(disk.esp_map_device(), f"{mount_dir}/boot/efi")
     mount_virtual_filesystems(mount_dir)
@@ -379,7 +380,7 @@ def download_files(disk_image: str, files: List[str]):
 def install_grub_command(disk_image: str, rootfs_label: str):
     disk = UEFIDisk.from_disk_image(disk_image)
 
-    mount_dir = tempfile.mkdtemp(prefix="genesis")
+    mount_dir = tempfile.mkdtemp(prefix="genesis-build")
     mount_partition(disk.rootfs_map_device(), mount_dir)
     mount_partition(disk.esp_map_device(), f"{mount_dir}/boot/efi")
     mount_virtual_filesystems(mount_dir)
@@ -419,7 +420,7 @@ def install_grub_command(disk_image: str, rootfs_label: str):
 def install_packages(disk_image: str, package: List[str]):
     disk = UEFIDisk.from_disk_image(disk_image)
 
-    mount_dir = tempfile.mkdtemp(prefix="genesis")
+    mount_dir = tempfile.mkdtemp(prefix="genesis-build")
     mount_partition(disk.rootfs_map_device(), mount_dir)
     mount_partition(disk.esp_map_device(), f"{mount_dir}/boot/efi")
     mount_virtual_filesystems(mount_dir)
@@ -443,7 +444,7 @@ def install_packages(disk_image: str, package: List[str]):
 def create_user(disk_image: str, username: str, ssh_key: str, sudo: bool):
     disk = UEFIDisk.from_disk_image(disk_image)
 
-    mount_dir = tempfile.mkdtemp(prefix="genesis")
+    mount_dir = tempfile.mkdtemp(prefix="genesis-build")
     mount_partition(disk.rootfs_map_device(), mount_dir)
 
     os.chroot(mount_dir)
