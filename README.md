@@ -49,3 +49,42 @@ qemu-img convert -f raw -O qcow2 jammy-disk.img jammy-disk.qcow2
 # and get rid of the raw image
 rm jammy-disk.img
 ```
+
+To build a minimal QCOW2 Ubuntu 23.04 image:
+
+```bash
+# Create basic root file system
+genesis debootstrap --output /tmp/lunar-rootfs --series lunar
+
+# Create the 4GB UEFI disk image containing our root file system
+genesis create-disk --rootfs-dir /tmp/lunar-rootfs --size 4 --disk-image lunar-disk.img
+
+# Update and install basic packages
+genesis update-system \
+    --disk-image lunar-disk.img \
+    --mirror "http://archive.ubuntu.com/ubuntu" \
+    --series "lunar" \
+    --extra-package openssh-server --extra-package apt-transport-https --extra-package ca-certificates --extra-package linux-kvm
+
+# Install grub
+genesis install-grub --disk-image lunar-disk.img
+
+# Create a default user name "ubuntu" and add it in the sudo group
+genesis create-user --disk-image /tmp/lunar-disk.img --username ubuntu --sudo
+
+# Add a SSH key for this user
+genesis copy-files --disk-image /tmp/lunar-disk.img --file /path/to/public/key:/home/ubuntu/.ssh/autorized_keys
+
+# Configure networking
+cat > /etc/netplan/50-image.yaml << EOF
+network:
+    version: 2
+    ethernets:
+        eth0:
+            dhcp4: true
+            match:
+                driver: virtio_net
+            set-name: eth0
+EOF
+genesis copy-files --disk-image /tmp/lunar-disk.img --file /tmp/netplan.yaml:/etc/netplan/50-image.yaml
+```
