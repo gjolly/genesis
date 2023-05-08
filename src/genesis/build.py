@@ -1,4 +1,5 @@
 import os
+import sys
 import shutil
 import tempfile
 from typing import Dict, List
@@ -33,6 +34,12 @@ def exit_chroot():
     os.chroot(".")
 
     os.chdir(CWD)
+
+
+def verify_root():
+    if os.geteuid() != 0:
+        print("This command requires root privileges. Re-run with sudo.", file=sys.stderr)
+        sys.exit(1)
 
 
 def setup_loop_device(disk_image_path: str) -> str:
@@ -256,6 +263,7 @@ class UEFIDisk:
 
 @click.group()
 def cli() -> None:
+    verify_root()
     pass
 
 
