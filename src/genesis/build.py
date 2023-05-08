@@ -168,9 +168,7 @@ def mount_virtual_filesystems(mount_dir: str) -> None:
     commands.run(["mount", "dev-live", "-t", "devtmpfs", f"{mount_dir}/dev"])
     commands.run(["mount", "proc-live", "-t", "proc", f"{mount_dir}/proc"])
     commands.run(["mount", "sysfs-live", "-t", "sysfs", f"{mount_dir}/sys"])
-    commands.run(
-        ["mount", "securityfs", "-t", "securityfs", f"{mount_dir}/sys/kernel/security"]
-    )
+    commands.run(["mount", "securityfs", "-t", "securityfs", f"{mount_dir}/sys/kernel/security"])
     commands.run(["mount", "-t", "cgroup2", "none", f"{mount_dir}/sys/fs/cgroup"])
     commands.run(["mount", "-t", "tmpfs", "none", f"{mount_dir}/tmp"])
     commands.run(["mount", "-t", "tmpfs", "none", f"{mount_dir}/var/lib/apt"])
@@ -188,7 +186,7 @@ def copy_extra_files(mount_dir: str, files: Dict[str, str]) -> None:
         dest = f"{mount_dir}{dest}"
 
         directory = os.path.dirname(dest)
-        commands.run(['mkdir', '-p', directory])
+        commands.run(["mkdir", "-p", directory])
 
         shutil.copy(local, dest)
 
@@ -238,9 +236,7 @@ class UEFIDisk:
         disk.loop_device = setup_loop_device(disk.path)
 
         disk_utils.format_partition(disk.rootfs_map_device(), partition_format="ext4")
-        disk_utils.format_partition(
-            disk.esp_map_device(), partition_format="vfat", label="UEFI"
-        )
+        disk_utils.format_partition(disk.esp_map_device(), partition_format="vfat", label="UEFI")
 
         return disk
 
@@ -270,9 +266,7 @@ def cli() -> None:
 @cli.command()
 @click.option("--output", type=str, default="rootfs", required=True)
 @click.option("--series", type=str, required=True)
-@click.option(
-    "--mirror", type=str, default="http://archive.ubuntu.com/ubuntu", required=True
-)
+@click.option("--mirror", type=str, default="http://archive.ubuntu.com/ubuntu", required=True)
 @click.option("--hostname", type=str, default="ubuntu", required=True)
 def debootstrap(output: str, series: str, mirror: str, hostname: str):
     os.mkdir(output)
@@ -309,9 +303,7 @@ def create_disk(rootfs_dir: str, disk_image: str, size: int):
 
 @cli.command()
 @click.option("--disk-image", type=str, default="disk.img", required=True)
-@click.option(
-    "--mirror", type=str, default="http://archive.ubuntu.com/ubuntu", required=True
-)
+@click.option("--mirror", type=str, default="http://archive.ubuntu.com/ubuntu", required=True)
 @click.option("--series", type=str, required=True)
 @click.option("--extra-package", multiple=True)
 def update_system(disk_image: str, mirror: str, series: str, extra_package: List[str]):
@@ -353,7 +345,7 @@ def copy_files(disk_image: str, file: List[str], owner: str, mod: str):
 
     file_map: Dict[str, str] = dict()
     for file in files:
-        src, dst = file.split(':')
+        src, dst = file.split(":")
         file_map[dst] = src
 
     copy_extra_files(mount_dir, file_map)
@@ -364,7 +356,7 @@ def copy_files(disk_image: str, file: List[str], owner: str, mod: str):
         if owner is not None:
             shutil.chown(dest, owner, owner)
         if mod is not None:
-            commands.run(['chmod', mod, dest])
+            commands.run(["chmod", mod, dest])
 
     exit_chroot()
 
@@ -413,9 +405,7 @@ def install_grub_command(disk_image: str, rootfs_label: str):
     if not os.path.exists(grub_config_dir):
         os.mkdir(grub_config_dir)
 
-    download_file(
-        grub_conf_url, f"{mount_dir}/etc/default/grub.d/extra-grub-config.cfg"
-    )
+    download_file(grub_conf_url, f"{mount_dir}/etc/default/grub.d/extra-grub-config.cfg")
 
     os.chroot(mount_dir)
 
@@ -464,7 +454,7 @@ def install_packages(disk_image: str, package: List[str]):
 @click.option("--disk-image", type=str, default="disk.img")
 @click.option("--username", type=str, default="ubuntu")
 @click.option("--ssh-key", type=str, required=False)
-@click.option('--sudo/--no-sudo', default=False)
+@click.option("--sudo/--no-sudo", default=False)
 def create_user(disk_image: str, username: str, ssh_key: str, sudo: bool):
     disk = UEFIDisk.from_disk_image(disk_image)
 
@@ -480,10 +470,18 @@ def create_user(disk_image: str, username: str, ssh_key: str, sudo: bool):
         user_exists = username in users
 
     if not user_exists:
-        commands.run(["adduser", "--quiet",
-                      "--shell", "/bin/bash",
-                      "--gecos", "''",
-                      "--disabled-password", username])
+        commands.run(
+            [
+                "adduser",
+                "--quiet",
+                "--shell",
+                "/bin/bash",
+                "--gecos",
+                "''",
+                "--disabled-password",
+                username,
+            ]
+        )
 
     if ssh_key is not None:
         # TODO: we should use path.join here
@@ -491,7 +489,7 @@ def create_user(disk_image: str, username: str, ssh_key: str, sudo: bool):
         commands.run(["mkdir", "-p", f"{home_dir}/.ssh"])
 
         ssh_key_file = f"{home_dir}/.ssh/authorized_keys"
-        with open(ssh_key_file, 'w') as key_file:
+        with open(ssh_key_file, "w") as key_file:
             key_file.write(ssh_key)
 
     if sudo:

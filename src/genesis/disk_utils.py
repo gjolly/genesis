@@ -31,9 +31,7 @@ def partition_uefi_disk(disk_image_path: str) -> None:
         ]
     )
 
-    commands.run(
-        ["/usr/sbin/sgdisk", disk_image_path, "-t", "14:ef02", "-t", "15:ef00"]
-    )
+    commands.run(["/usr/sbin/sgdisk", disk_image_path, "-t", "14:ef02", "-t", "15:ef00"])
 
     commands.run(["/usr/sbin/sgdisk", disk_image_path, "--print"])
 
@@ -70,9 +68,7 @@ def format_vfat_partition(device: str, label: str) -> None:
     commands.run(["mkfs.vfat", "-F", "32", "-n", label, device])
 
 
-def format_partition(
-    device: str, partition_format: str = "ext4", label: str = "rootfs"
-) -> None:
+def format_partition(device: str, partition_format: str = "ext4", label: str = "rootfs") -> None:
     if partition_format == "ext4":
         format_ext4_partition(device, label)
     elif partition_format == "vfat":
