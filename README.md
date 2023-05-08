@@ -23,7 +23,7 @@ To build a QCOW2 (QEMU) Ubuntu 22.04 LTS image:
 genesis debootstrap --output /tmp/jammy-rootfs --series jammy
 
 # creating a disk image from this root filesystem
-genesis create-disk --rootfs-dir /tmp/jammy-rootfs
+genesis create-disk --disk-image jammy-disk.img --rootfs-dir /tmp/jammy-rootfs
 
 # Updating the image (at this point it only contains
 # packages from the release pocket)
