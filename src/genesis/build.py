@@ -344,8 +344,8 @@ def copy_files(disk_image: str, file: List[str], owner: str, mod: str):
     mount_virtual_filesystems(mount_dir)
 
     file_map: Dict[str, str] = dict()
-    for file in files:
-        src, dst = file.split(":")
+    for f in files:
+        src, dst = f.split(":")
         file_map[dst] = src
 
     copy_extra_files(mount_dir, file_map)

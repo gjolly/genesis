@@ -31,7 +31,9 @@ dev = [
     "tox",
     "mypy",
     "flake8",
-    "black"
+    "black",
+    "types-PyYAML",
+    "types-requests"
 ]
 
 [project.urls]

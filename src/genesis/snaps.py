@@ -137,8 +137,8 @@ def preseed_snap(
     # we don't want to install the snap if it depends on "core"
     elif not is_self_contained(info) and "base" not in info:
         print(
-            f"WARN: legacy snap with no base declaration found ({snap}), refusing to install 'core' snap"
-        )  # noqa
+            f"WARN: legacy snap with no base declaration found ({snap}), refusing to install 'core' snap"  # noqa: E501
+        )
         os.chdir(cwd)
         return
 
