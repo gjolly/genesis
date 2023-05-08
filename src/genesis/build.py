@@ -43,20 +43,11 @@ def verify_root():
 
 
 def setup_loop_device(disk_image_path: str) -> str:
-    commands.run(["kpartx", "-s", "-v", "-a", disk_image_path])
-
     out = commands.run_and_save_output(
-        ["losetup", "--noheadings", "--output", "NAME,BACK-FILE", "-l"]
+        ["losetup", "-P", "-f", "--show", disk_image_path]
     )
-    lines_out = out.rstrip().split("\n")
-
-    for line in lines_out:
-        fields = line.split()
-        device, file_path = fields[0], fields[1]
-        if disk_image_path in file_path:
-            loop_device = device.removeprefix("/dev/")
-            break
-
+    line_out = out.rstrip()
+    loop_device = line_out.removeprefix("/dev/")
     return loop_device
 
 
@@ -75,12 +66,6 @@ def umount_all(mount_dir: str):
 
 
 def teardown_loop_device(device: str):
-    out = commands.run_and_save_output(["dmsetup", "table"])
-    for line in out.rstrip().split("\n"):
-        mapper_dev = line.split(":")[0]
-        if device in mapper_dev:
-            commands.run(["dmsetup", "remove", f"/dev/mapper/{mapper_dev}"])
-
     commands.run(["losetup", "-d", f"/dev/{device}"])
 
 
@@ -251,10 +236,10 @@ class UEFIDisk:
         return disk
 
     def rootfs_map_device(self) -> str:
-        return f"/dev/mapper/{self.loop_device}p{self.rootfs_partition_number}"
+        return f"/dev/{self.loop_device}p{self.rootfs_partition_number}"
 
     def esp_map_device(self) -> str:
-        return f"/dev/mapper/{self.loop_device}p{self.esp_partition_number}"
+        return f"/dev/{self.loop_device}p{self.esp_partition_number}"
 
 
 @click.group()
