@@ -25,6 +25,15 @@ dependencies = [
     "requests",
 ]
 
+
+[project.optional-dependencies]
+dev = [
+    "tox",
+    "mypy",
+    "flake8",
+    "black"
+]
+
 [project.urls]
 "Homepage" = "https://github.com/gjolly/genesis"
 "Bug Tracker" = "https://github.com/gjolly/genesis/issues"
@@ -32,9 +41,5 @@ dependencies = [
 [project.scripts]
 genesis = "genesis.build:cli"
 
-[flake8]
-max-line-length = 88
-extend-ignore = "E203"
-
-[isort]
+[tool.isort]
 profile = "black"
