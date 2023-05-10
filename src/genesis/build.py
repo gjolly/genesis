@@ -43,9 +43,7 @@ def verify_root():
 
 
 def setup_loop_device(disk_image_path: str) -> str:
-    out = commands.run_and_save_output(
-        ["losetup", "-P", "-f", "--show", disk_image_path]
-    )
+    out = commands.run_and_save_output(["losetup", "-P", "-f", "--show", disk_image_path])
     line_out = out.rstrip()
     loop_device = line_out.removeprefix("/dev/")
     return loop_device
