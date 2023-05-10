@@ -469,6 +469,9 @@ def create_user(disk_image: str, username: str, ssh_key: str, sudo: bool):
             ]
         )
 
+        # actually disable the password
+        commands.run(["passwd", "--delete", username])
+
     if ssh_key is not None:
         # TODO: we should use path.join here
         home_dir = f"/home/{username}"
