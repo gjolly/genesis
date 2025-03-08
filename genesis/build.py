@@ -1,6 +1,7 @@
 import os
 import shutil
 import tempfile
+from platform import processor
 from typing import Dict, List
 
 import click
@@ -118,7 +119,21 @@ def undivert_grub() -> None:
 
 
 def install_grub(device: str) -> None:
-    install_extra_packages(["shim-signed", "grub-pc"])
+    """
+    Install shim and grub and configure grub.
+    This function will only work for amd64 and arm64.
+    """
+    packages = ["shim-signed"]
+
+    # we only support legacy boot on x64
+    if processor() == 'x86_64':
+        packages.append("grub-pc")
+
+    install_extra_packages(packages)
+
+    efi_target = 'x86_64-efi'
+    if processor() == "aarch64":
+        efi_target = 'arm64-efi'
 
     commands.run(
         [
@@ -126,14 +141,15 @@ def install_grub(device: str) -> None:
             device,
             "--boot-directory=/boot",
             "--efi-directory=/boot/efi",
-            "--target=x86_64-efi",
+            f"--target={efi_target}",
             "--uefi-secure-boot",
             "--no-nvram",
         ],
         cwd="/",
     )
 
-    commands.run(["grub-install", "--target=i386-pc", device], cwd="/")
+    if processor() == 'x86_64':
+        commands.run(["grub-install", "--target=i386-pc", device], cwd="/")
 
     divert_grub()
     commands.run(["update-grub"], cwd="/")
