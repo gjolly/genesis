@@ -156,9 +156,10 @@ def install_bootloader(bootloader: str, device: str) -> None:
 
 def setup_source_list(mirror: str, series: str) -> None:
     f = open("/etc/apt/sources.list", "w")
-    f.write(f"deb {mirror} {series} main\n")
-    f.write(f"deb {mirror} {series}-updates main\n")
-    f.write(f"deb {mirror} {series}-security main\n")
+    components = "main universe multiverse restricted"
+    f.write(f"deb {mirror} {series} {components}\n")
+    f.write(f"deb {mirror} {series}-updates {components}\n")
+    f.write(f"deb {mirror} {series}-security {components}\n")
 
     f.close()
 
