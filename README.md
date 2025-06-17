@@ -1,5 +1,7 @@
 # Genesis
 
+A tool to build live server images of Ubuntu.
+
 ## Install
 
 ### On Ubuntu from a PPA
