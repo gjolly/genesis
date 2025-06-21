@@ -2,6 +2,7 @@ import os
 import sys
 import shutil
 import tempfile
+from glob import glob
 from platform import processor
 from typing import Dict, List
 
@@ -11,40 +12,92 @@ import requests
 import genesis.commands as commands
 import genesis.disk_utils as disk_utils
 
-SYSTEM_ROOT = os.open("/", os.O_RDONLY)
-CWD = os.getcwd()
+
+NAMESERVER = "1.1.1.1"
 
 
 def run_deboostrap(series: str, bootstrap_mirror: str, build_dir_path: str) -> None:
     commands.run(["/usr/sbin/debootstrap", series, build_dir_path, bootstrap_mirror])
 
 
-def install_extra_packages(packages: List[str]):
-    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-    commands.run(["/usr/bin/apt-get", "update"])
-    commands.run(["/usr/bin/apt-get", "install", "-y"] + packages)
+def setup_apt_cache(directory: str, apt_cache: str) -> None:
+    cache_config = os.path.join(directory, "etc/apt/apt.conf.d/00aptproxy")
+    with open(cache_config, "w") as f:
+        f.write(f'Acquire::http::Proxy "{apt_cache}";\n')
 
 
-def do_system_update():
-    commands.run(["/usr/bin/apt-get", "update"])
-    commands.run(["/usr/bin/apt-get", "-y", "upgrade"])
+def remove_apt_cache(directory: str) -> None:
+    cache_config = os.path.join(directory, "etc/apt/apt.conf.d/00aptproxy")
+    if os.path.exists(cache_config):
+        os.remove(cache_config)
 
 
-def exit_chroot():
-    os.fchdir(SYSTEM_ROOT)
-    os.chroot(".")
+def install_extra_packages(device: str, directory: str, packages: List[str]):
+    environment = {
+        "DEBIAN_FRONTEND": "noninteractive",
+    }
+    bind_devices = glob(f"{device}*")
 
-    os.chdir(CWD)
+    commands.run_with_nspawn(
+        directory, ["/usr/bin/apt", "update"], environment=environment
+    )
+    commands.run_with_nspawn(
+        directory,
+        ["/usr/bin/apt", "install", "-y"] + packages,
+        environment=environment,
+        bind_devices=bind_devices,
+    )
+
+
+def do_system_update(device: str, directory: str) -> None:
+    environment = {
+        "DEBIAN_FRONTEND": "noninteractive",
+    }
+    bind_devices = glob(f"{device}*")
+
+    commands.run_with_nspawn(
+        directory, ["/usr/bin/apt", "update"], environment=environment
+    )
+    commands.run_with_nspawn(
+        directory,
+        ["/usr/bin/apt", "-y", "full-upgrade"],
+        environment=environment,
+        bind_devices=bind_devices,
+    )
+
+
+def replace_resolv_conf(directory: str, nameserver: str) -> str:
+    resolv_conf = os.path.join(directory, "etc/resolv.conf")
+    saved_resolvconf_fd, saved_resolvconf = tempfile.mkstemp(
+        prefix="resolv", suffix=".conf"
+    )
+    os.close(saved_resolvconf_fd)
+    if os.path.exists(resolv_conf):
+        commands.run(["mv", resolv_conf, saved_resolvconf])
+
+    with open(resolv_conf, "w") as f:
+        f.write(f"nameserver {nameserver}\n")
+
+    return saved_resolvconf
+
+
+def restore_resolv_conf(directory: str, saved_resolvconf: str) -> None:
+    resolv_conf = os.path.join(directory, "etc/resolv.conf")
+    commands.run(["mv", saved_resolvconf, resolv_conf])
 
 
 def verify_root():
     if os.geteuid() != 0:
-        print("This command requires root privileges. Re-run with sudo.", file=sys.stderr)
+        print(
+            "This command requires root privileges. Re-run with sudo.", file=sys.stderr
+        )
         sys.exit(1)
 
 
 def setup_loop_device(disk_image_path: str) -> str:
-    out = commands.run_and_save_output(["losetup", "-P", "-f", "--show", disk_image_path])
+    out = commands.run_and_save_output(
+        ["losetup", "-P", "-f", "--show", disk_image_path]
+    )
     line_out = out.rstrip()
     loop_device = line_out.removeprefix("/dev/")
     return loop_device
@@ -54,8 +107,8 @@ def mount_partition(rootfs_partition: str, mount_dir: str) -> None:
     commands.run(["mount", rootfs_partition, mount_dir])
 
 
-def add_fstab_entry(entry: str):
-    f = open("/etc/fstab", "a")
+def add_fstab_entry(mount_dir: str, entry: str):
+    f = open(f"{mount_dir}/etc/fstab", "a")
     f.write(f"{entry}\n")
     f.close()
 
@@ -68,8 +121,9 @@ def teardown_loop_device(device: str):
     commands.run(["losetup", "-d", f"/dev/{device}"])
 
 
-def divert_grub() -> None:
-    commands.run(
+def divert_grub(directory: str) -> None:
+    commands.run_with_nspawn(
+        directory,
         [
             "dpkg-divert",
             "--local",
@@ -77,21 +131,27 @@ def divert_grub() -> None:
             "/etc/grub.d/30_os-prober.dpkg-divert",
             "--rename",
             "/etc/grub.d/30_os-prober",
-        ]
+        ],
+        cwd="/",
     )
 
-    detect_virt_tool = "/usr/bin/systemd-detect-virt"
-    commands.run(["dpkg-divert", "--local", "--rename", detect_virt_tool])
+    detect_virt_tool = "usr/bin/systemd-detect-virt"
+    commands.run_with_nspawn(
+        directory,
+        ["dpkg-divert", "--local", "--rename", f"/{detect_virt_tool}"],
+        cwd="/",
+    )
 
-    f = open(detect_virt_tool, "w")
+    f = open(os.path.join(directory, detect_virt_tool), "w")
     f.write("exit 1\n")
     f.close()
 
-    commands.run(["chmod", "+x", detect_virt_tool])
+    commands.run_with_nspawn(directory, ["chmod", "+x", detect_virt_tool])
 
 
-def undivert_grub() -> None:
-    commands.run(
+def undivert_grub(directory: str) -> None:
+    commands.run_with_nspawn(
+        directory,
         [
             "dpkg-divert",
             "--remove",
@@ -100,15 +160,20 @@ def undivert_grub() -> None:
             "/etc/grub.d/30_os-prober.dpkg-divert",
             "--rename",
             "/etc/grub.d/30_os-prober",
-        ]
+        ],
+        cwd="/",
     )
 
-    detect_virt_tool = "/usr/bin/systemd-detect-virt"
-    os.remove(detect_virt_tool)
-    commands.run(["dpkg-divert", "--remove", "--local", "--rename", detect_virt_tool])
+    detect_virt_tool = "usr/bin/systemd-detect-virt"
+    os.remove(os.path.join(directory, detect_virt_tool))
+    commands.run_with_nspawn(
+        directory,
+        ["dpkg-divert", "--remove", "--local", "--rename", f"/{detect_virt_tool}"],
+        cwd="/",
+    )
 
 
-def install_grub(device: str) -> None:
+def install_grub(directory: str, device: str) -> None:
     """
     Install shim and grub and configure grub.
     This function will only work for amd64 and arm64.
@@ -116,16 +181,19 @@ def install_grub(device: str) -> None:
     packages = ["shim-signed"]
 
     # we only support legacy boot on x64
-    if processor() == 'x86_64':
+    if processor() == "x86_64":
         packages.append("grub-pc")
 
-    install_extra_packages(packages)
+    install_extra_packages(device, directory, packages)
 
-    efi_target = 'x86_64-efi'
+    efi_target = "x86_64-efi"
     if processor() == "aarch64":
-        efi_target = 'arm64-efi'
+        efi_target = "arm64-efi"
 
-    commands.run(
+    bind_devices = glob(f"{device}*")
+
+    commands.run_with_nspawn(
+        directory,
         [
             "grub-install",
             device,
@@ -136,43 +204,40 @@ def install_grub(device: str) -> None:
             "--no-nvram",
         ],
         cwd="/",
+        bind_devices=bind_devices,
     )
 
-    if processor() == 'x86_64':
-        commands.run(["grub-install", "--target=i386-pc", device], cwd="/")
+    if processor() == "x86_64":
+        commands.run_with_nspawn(
+            directory,
+            ["grub-install", "--target=i386-pc", device],
+            cwd="/",
+            bind_devices=bind_devices,
+        )
 
-    divert_grub()
-    commands.run(["update-grub"], cwd="/")
+    divert_grub(directory)
+    commands.run_with_nspawn(
+        directory, ["update-grub"], bind_devices=bind_devices, cwd="/"
+    )
 
-    undivert_grub()
+    undivert_grub(directory)
 
 
-def install_bootloader(bootloader: str, device: str) -> None:
+def install_bootloader(bootloader: str, directory: str, device: str) -> None:
     if bootloader == "grub":
-        install_grub(device)
+        install_grub(directory, device)
     else:
         raise ValueError(f"bootloader {bootloader} not supported")
 
 
-def setup_source_list(mirror: str, series: str) -> None:
-    f = open("/etc/apt/sources.list", "w")
+def setup_source_list(mount_dir: str, mirror: str, series: str) -> None:
+    f = open(os.path.join(mount_dir, "etc/apt/sources.list"), "w")
     components = "main universe multiverse restricted"
     f.write(f"deb {mirror} {series} {components}\n")
     f.write(f"deb {mirror} {series}-updates {components}\n")
     f.write(f"deb {mirror} {series}-security {components}\n")
 
     f.close()
-
-
-def mount_virtual_filesystems(mount_dir: str) -> None:
-    commands.run(["mount", "dev-live", "-t", "devtmpfs", f"{mount_dir}/dev"])
-    commands.run(["mount", "proc-live", "-t", "proc", f"{mount_dir}/proc"])
-    commands.run(["mount", "sysfs-live", "-t", "sysfs", f"{mount_dir}/sys"])
-    commands.run(["mount", "securityfs", "-t", "securityfs", f"{mount_dir}/sys/kernel/security"])
-    commands.run(["mount", "-t", "cgroup2", "none", f"{mount_dir}/sys/fs/cgroup"])
-    commands.run(["mount", "-t", "tmpfs", "none", f"{mount_dir}/tmp"])
-    commands.run(["mount", "-t", "tmpfs", "none", f"{mount_dir}/var/lib/apt"])
-    commands.run(["mount", "-t", "tmpfs", "none", f"{mount_dir}/var/cache/apt"])
 
 
 def copy_directory(src: str, dest: str) -> None:
@@ -236,7 +301,9 @@ class UEFIDisk:
         disk.loop_device = setup_loop_device(disk.path)
 
         disk_utils.format_partition(disk.rootfs_map_device(), partition_format="ext4")
-        disk_utils.format_partition(disk.esp_map_device(), partition_format="vfat", label="UEFI")
+        disk_utils.format_partition(
+            disk.esp_map_device(), partition_format="vfat", label="UEFI"
+        )
 
         return disk
 
@@ -266,10 +333,19 @@ def cli() -> None:
 @cli.command()
 @click.option("--output", type=str, default="rootfs", required=True)
 @click.option("--series", type=str, required=True)
-@click.option("--mirror", type=str, default="http://archive.ubuntu.com/ubuntu", required=True)
+@click.option(
+    "--mirror", type=str, default="http://archive.ubuntu.com/ubuntu", required=True
+)
 @click.option("--hostname", type=str, default="ubuntu", required=True)
-def debootstrap(output: str, series: str, mirror: str, hostname: str):
+@click.option("--apt-cache", type=str)
+def debootstrap(
+    output: str, series: str, mirror: str, hostname: str, apt_cache: str
+) -> None:
     os.mkdir(output)
+    if apt_cache is not None:
+        mirror_without_scheme = mirror.split("://")[1]
+        mirror = f"{apt_cache}/{mirror_without_scheme}"
+
     run_deboostrap(series, mirror, output)
 
     f = open(f"{output}/etc/hostname", "w")
@@ -288,12 +364,8 @@ def create_disk(rootfs_dir: str, disk_image: str, size: int):
     copy_directory(rootfs_dir, mount_dir)
     os.mkdir(f"{mount_dir}/boot/efi")
 
-    os.chroot(mount_dir)
-
-    add_fstab_entry("LABEL=rootfs\t/\text4\tdefaults\t0\t1")
-    add_fstab_entry("LABEL=UEFI\t/boot/efi\tvfat\tumask=0077\t0\t1")
-
-    exit_chroot()
+    add_fstab_entry(mount_dir, "LABEL=rootfs\t/\text4\tdefaults\t0\t1")
+    add_fstab_entry(mount_dir, "LABEL=UEFI\t/boot/efi\tvfat\tumask=0077\t0\t1")
 
     umount_all(mount_dir)
     teardown_loop_device(disk.loop_device)
@@ -304,27 +376,31 @@ def create_disk(rootfs_dir: str, disk_image: str, size: int):
 
 @cli.command()
 @click.option("--disk-image", type=str, default="disk.img", required=True)
-@click.option("--mirror", type=str, default="http://archive.ubuntu.com/ubuntu", required=True)
+@click.option(
+    "--mirror", type=str, default="http://archive.ubuntu.com/ubuntu", required=True
+)
 @click.option("--series", type=str, required=True)
 @click.option("--extra-package", multiple=True)
-def update_system(disk_image: str, mirror: str, series: str, extra_package: List[str]):
+@click.option("--apt-cache", type=str)
+def update_system(
+    disk_image: str, mirror: str, series: str, extra_package: List[str], apt_cache: str
+) -> None:
     disk = UEFIDisk.from_disk_image(disk_image)
 
     mount_dir = tempfile.mkdtemp(prefix="genesis-build")
     mount_partition(disk.rootfs_map_device(), mount_dir)
     mount_partition(disk.esp_map_device(), f"{mount_dir}/boot/efi")
-    mount_virtual_filesystems(mount_dir)
 
-    os.chroot(mount_dir)
+    if apt_cache is not None:
+        setup_apt_cache(mount_dir, apt_cache)
+    setup_source_list(mount_dir, mirror, series)
+    saved_resolvconf = replace_resolv_conf(mount_dir, NAMESERVER)
 
-    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
+    do_system_update(f"/dev/{disk.loop_device}", mount_dir)
+    install_extra_packages(f"/dev/{disk.loop_device}", mount_dir, list(extra_package))
 
-    setup_source_list(mirror, series)
-    do_system_update()
-
-    install_extra_packages(list(extra_package))
-
-    exit_chroot()
+    remove_apt_cache(mount_dir)
+    restore_resolv_conf(mount_dir, saved_resolvconf)
     umount_all(mount_dir)
     teardown_loop_device(disk.loop_device)
     os.rmdir(mount_dir)
@@ -342,7 +418,6 @@ def copy_files(disk_image: str, file: List[str], owner: str, mod: str):
     mount_dir = tempfile.mkdtemp(prefix="genesis-build")
     mount_partition(disk.rootfs_map_device(), mount_dir)
     mount_partition(disk.esp_map_device(), f"{mount_dir}/boot/efi")
-    mount_virtual_filesystems(mount_dir)
 
     file_map: Dict[str, str] = dict()
     for f in files:
@@ -351,15 +426,11 @@ def copy_files(disk_image: str, file: List[str], owner: str, mod: str):
 
     copy_extra_files(mount_dir, file_map)
 
-    os.chroot(mount_dir)
-
     for dest in file_map:
         if owner is not None:
-            shutil.chown(dest, owner, owner)
+            commands.run_with_nspawn(mount_dir, ["chown", owner, dest])
         if mod is not None:
-            commands.run(["chmod", mod, dest])
-
-    exit_chroot()
+            commands.run_with_nspawn(mount_dir, ["chmod", mod, dest])
 
     umount_all(mount_dir)
     teardown_loop_device(disk.loop_device)
@@ -375,15 +446,11 @@ def download_files(disk_image: str, files: List[str]):
     mount_dir = tempfile.mkdtemp(prefix="genesis-build")
     mount_partition(disk.rootfs_map_device(), mount_dir)
     mount_partition(disk.esp_map_device(), f"{mount_dir}/boot/efi")
-    mount_virtual_filesystems(mount_dir)
-
-    os.chroot(mount_dir)
 
     for file_url in files:
         path, url = file_url.split(":")
-        download_file(url, path)
+        download_file(url, f"{mount_dir}/path")
 
-    exit_chroot()
     umount_all(mount_dir)
     teardown_loop_device(disk.loop_device)
     os.rmdir(mount_dir)
@@ -392,13 +459,13 @@ def download_files(disk_image: str, files: List[str]):
 @cli.command("install-grub")
 @click.option("--disk-image", type=str, default="disk.img")
 @click.option("--rootfs-label", type=str, default="rootfs")
-def install_grub_command(disk_image: str, rootfs_label: str):
+@click.option("--apt-cache", type=str)
+def install_grub_command(disk_image: str, rootfs_label: str, apt_cache: str) -> None:
     disk = UEFIDisk.from_disk_image(disk_image)
 
     mount_dir = tempfile.mkdtemp(prefix="genesis-build")
     mount_partition(disk.rootfs_map_device(), mount_dir)
     mount_partition(disk.esp_map_device(), f"{mount_dir}/boot/efi")
-    mount_virtual_filesystems(mount_dir)
 
     grub_conf_url = "https://gist.githubusercontent.com/gjolly/14ed79fa5323a1d7a7f653f8dda60921/raw/8df1830c1ce6aa80b23515d9420c9afdc987ee1d/extra-grub-config.cfg"  # noqa
 
@@ -406,13 +473,15 @@ def install_grub_command(disk_image: str, rootfs_label: str):
     if not os.path.exists(grub_config_dir):
         os.mkdir(grub_config_dir)
 
-    download_file(grub_conf_url, f"{mount_dir}/etc/default/grub.d/extra-grub-config.cfg")
+    download_file(
+        grub_conf_url, f"{mount_dir}/etc/default/grub.d/extra-grub-config.cfg"
+    )
 
-    os.chroot(mount_dir)
+    if apt_cache is not None:
+        setup_apt_cache(mount_dir, apt_cache)
 
-    install_bootloader("grub", f"/dev/{disk.loop_device}")
-
-    exit_chroot()
+    saved_resolvconf = replace_resolv_conf(mount_dir, NAMESERVER)
+    install_bootloader("grub", mount_dir, f"/dev/{disk.loop_device}")
 
     commands.run(
         [
@@ -424,6 +493,8 @@ def install_grub_command(disk_image: str, rootfs_label: str):
         ]
     )
 
+    remove_apt_cache(mount_dir)
+    restore_resolv_conf(mount_dir, saved_resolvconf)
     umount_all(mount_dir)
     teardown_loop_device(disk.loop_device)
     os.rmdir(mount_dir)
@@ -432,20 +503,21 @@ def install_grub_command(disk_image: str, rootfs_label: str):
 @cli.command()
 @click.option("--disk-image", type=str, default="disk.img")
 @click.option("--package", multiple=True)
-def install_packages(disk_image: str, package: List[str]):
+@click.option("--apt-cache", type=str)
+def install_packages(disk_image: str, package: List[str], apt_cache: str) -> None:
     disk = UEFIDisk.from_disk_image(disk_image)
 
     mount_dir = tempfile.mkdtemp(prefix="genesis-build")
     mount_partition(disk.rootfs_map_device(), mount_dir)
     mount_partition(disk.esp_map_device(), f"{mount_dir}/boot/efi")
-    mount_virtual_filesystems(mount_dir)
+    saved_resolvconf = replace_resolv_conf(mount_dir, NAMESERVER)
 
-    os.chroot(mount_dir)
+    if apt_cache is not None:
+        setup_apt_cache(mount_dir, apt_cache)
+    install_extra_packages(f"/dev/{disk.loop_device}", mount_dir, list(package))
 
-    install_extra_packages(list(package))
-
-    exit_chroot()
-
+    remove_apt_cache(mount_dir)
+    restore_resolv_conf(mount_dir, saved_resolvconf)
     umount_all(mount_dir)
     teardown_loop_device(disk.loop_device)
     os.rmdir(mount_dir)
@@ -462,16 +534,15 @@ def create_user(disk_image: str, username: str, ssh_key: str, sudo: bool):
     mount_dir = tempfile.mkdtemp(prefix="genesis-build")
     mount_partition(disk.rootfs_map_device(), mount_dir)
 
-    os.chroot(mount_dir)
-
     user_exists: bool = False
-    with open("/etc/passwd") as passwd:
+    with open(os.path.join(mount_dir, "etc/passwd")) as passwd:
         lines = passwd.readlines()
         users = [line.split(":")[0] for line in lines]
         user_exists = username in users
 
     if not user_exists:
-        commands.run(
+        commands.run_with_nspawn(
+            mount_dir,
             [
                 "adduser",
                 "--quiet",
@@ -481,25 +552,23 @@ def create_user(disk_image: str, username: str, ssh_key: str, sudo: bool):
                 "''",
                 "--disabled-password",
                 username,
-            ]
+            ],
         )
 
         # actually disable the password
-        commands.run(["passwd", "--delete", username])
+        commands.run_with_nspawn(mount_dir, ["passwd", "--delete", username])
 
     if ssh_key is not None:
         # TODO: we should use path.join here
-        home_dir = f"/home/{username}"
+        home_dir = os.path.join(mount_dir, f"home/{username}")
         commands.run(["mkdir", "-p", f"{home_dir}/.ssh"])
 
-        ssh_key_file = f"{home_dir}/.ssh/authorized_keys"
+        ssh_key_file = os.path.join(home_dir, ".ssh/authorized_keys")
         with open(ssh_key_file, "w") as key_file:
             key_file.write(ssh_key)
 
     if sudo:
-        commands.run(["usermod", "-aG", "sudo", username])
-
-    exit_chroot()
+        commands.run_with_nspawn(mount_dir, ["usermod", "-aG", "sudo", username])
 
     umount_all(mount_dir)
     teardown_loop_device(disk.loop_device)

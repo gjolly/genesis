@@ -25,7 +25,6 @@ dependencies = [
     "requests",
 ]
 
-
 [project.optional-dependencies]
 dev = [
     "tox",

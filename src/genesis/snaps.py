@@ -50,7 +50,9 @@ def delete_signature(content: str) -> str:
     return split_content[0]
 
 
-def prepare_assertions(assertion_dir: str, brand: str = "generic", model: str = "generic-classic"):
+def prepare_assertions(
+    assertion_dir: str, brand: str = "generic", model: str = "generic-classic"
+):
     model_path = f"{assertion_dir}/model"
     account_key_path = f"{assertion_dir}/account-key"
     account_path = f"{assertion_dir}/account"

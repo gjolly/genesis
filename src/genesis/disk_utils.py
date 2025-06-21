@@ -1,5 +1,6 @@
 import tempfile
 
+import os
 import genesis.commands as commands
 
 
@@ -9,8 +10,9 @@ def create_empty_disk(size: int) -> str:
     :param size: size of the disk (in GigaBytes)
     :return: location of the disk
     """
-    disk_path = tempfile.mktemp(prefix="genesis", suffix=".img")
-    commands.run(["/usr/bin/qemu-img", "create", disk_path, str(size) + "G"])
+    disk_fd, disk_path = tempfile.mkstemp(prefix="genesis", suffix=".img")
+    os.close(disk_fd)
+    commands.run(["truncate", "-s", str(size) + "G", disk_path])
 
     return disk_path
 
@@ -31,7 +33,9 @@ def partition_uefi_disk(disk_image_path: str) -> None:
         ]
     )
 
-    commands.run(["/usr/sbin/sgdisk", disk_image_path, "-t", "14:ef02", "-t", "15:ef00"])
+    commands.run(
+        ["/usr/sbin/sgdisk", disk_image_path, "-t", "14:ef02", "-t", "15:ef00"]
+    )
 
     commands.run(["/usr/sbin/sgdisk", disk_image_path, "--print"])
 
@@ -68,7 +72,9 @@ def format_vfat_partition(device: str, label: str) -> None:
     commands.run(["mkfs.vfat", "-F", "32", "-n", label, device])
 
 
-def format_partition(device: str, partition_format: str = "ext4", label: str = "rootfs") -> None:
+def format_partition(
+    device: str, partition_format: str = "ext4", label: str = "rootfs"
+) -> None:
     if partition_format == "ext4":
         format_ext4_partition(device, label)
     elif partition_format == "vfat":
